@@ -359,6 +359,12 @@ static int handle_dlpar_errorlog(struct pseries_hp_errorlog *hp_elog)
 	case PSERIES_HP_ELOG_RESOURCE_CPU:
 		rc = dlpar_cpu(hp_elog);
 		break;
+	case PSERIES_HP_ELOG_RESOURCE_PHB:
+		rc = dlpar_phb(hp_elog);
+		break;
+	case PSERIES_HP_ELOG_RESOURCE_PCI:
+		rc = dlpar_pci(hp_elog);
+		break;
 	default:
 		pr_warn_ratelimited("Invalid resource (%d) specified\n",
 				    hp_elog->resource);
@@ -391,6 +397,12 @@ static ssize_t dlpar_store(struct class *class, struct class_attribute *attr,
 	} else if (!strncmp(arg, "cpu", 3)) {
 		hp_elog->resource = PSERIES_HP_ELOG_RESOURCE_CPU;
 		arg += strlen("cpu ");
+	} else if (!strncmp(arg, "phb", 3)) {
+		hp_elog->resource = PSERIES_HP_ELOG_RESOURCE_PHB;
+		arg += strlen("phb ");
+	} else if (!strncmp(arg, "pci", 3)) {
+		hp_elog->resource = PSERIES_HP_ELOG_RESOURCE_PCI;
+		arg += strlen("pci ");
 	} else {
 		pr_err("Invalid resource specified: \"%s\"\n", buf);
 		rc = -EINVAL;
