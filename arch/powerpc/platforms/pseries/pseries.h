@@ -55,6 +55,16 @@ extern unsigned long rtas_poweron_auto;
 extern void hvc_vio_init_early(void);
 
 /* Dynamic logical Partitioning/Mobility */
+#define DR_ENTITY_SENSE		9003
+#define DR_ENTITY_PRESENT	1
+#define DR_ENTITY_UNUSABLE	2
+#define ALLOCATION_STATE	9003
+#define ALLOC_UNUSABLE		0
+#define ALLOC_USABLE		1
+#define ISOLATION_STATE		9001
+#define ISOLATE			0
+#define UNISOLATE		1
+
 extern void dlpar_free_cc_nodes(struct device_node *);
 extern void dlpar_free_cc_property(struct property *);
 extern struct device_node *dlpar_configure_connector(__be32,
@@ -77,6 +87,20 @@ static inline int dlpar_memory(struct pseries_hp_errorlog *hp_elog)
 int dlpar_cpu(struct pseries_hp_errorlog *hp_elog);
 #else
 static inline int dlpar_cpu(struct pseries_hp_errorlog *hp_elog)
+{
+	return -EOPNOTSUPP;
+}
+#endif
+
+#ifdef CONFIG_HOTPLUG_PCI
+int dlpar_pci(struct pseries_hp_errorlog *hp_elog);
+int dlpar_phb(struct pseries_hp_errorlog *hp_elog);
+#else
+static inline int dlpar_pci(struct pseries_hp_errorlog *hp_elog)
+{
+	return -EOPNOTSUPP;
+}
+static inline int dlpar_phb(struct pseries_hp_errorlog *hp_elog)
 {
 	return -EOPNOTSUPP;
 }

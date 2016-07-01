@@ -283,16 +283,6 @@ int dlpar_detach_node(struct device_node *dn)
 	return 0;
 }
 
-#define DR_ENTITY_SENSE		9003
-#define DR_ENTITY_PRESENT	1
-#define DR_ENTITY_UNUSABLE	2
-#define ALLOCATION_STATE	9003
-#define ALLOC_UNUSABLE		0
-#define ALLOC_USABLE		1
-#define ISOLATION_STATE		9001
-#define ISOLATE			0
-#define UNISOLATE		1
-
 int dlpar_acquire_drc(u32 drc_index)
 {
 	int dr_status, rc;
