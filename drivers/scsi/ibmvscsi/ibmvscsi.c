@@ -69,6 +69,7 @@
 #include <linux/pm.h>
 #include <linux/kthread.h>
 #include <asm/firmware.h>
+#include <asm/reg.h>
 #include <asm/vio.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_cmnd.h>
@@ -122,6 +123,89 @@ MODULE_PARM_DESC(client_reserve, "Attempt client managed reserve/release");
 
 static void ibmvscsi_handle_crq(struct viosrp_crq *crq,
 				struct ibmvscsi_host_data *hostdata);
+
+static void ibmvscsi_trc_start(struct srp_event_struct *evt)
+{
+	struct ibmvscsi_host_data *vhost = evt->hostdata;
+	struct srp_cmd *vscsi_cmd = &evt->iu.srp.cmd;
+	struct mad_common *mad = &evt->iu.mad.common;
+	struct ibmvscsi_trace_entry *entry;
+
+	entry = &vhost->trace[vhost->trace_index++];
+	entry->evt = evt;
+	entry->mftb = mftb();
+	entry->time = jiffies;
+	entry->fmt = evt->crq.format;
+	entry->type = IBMVSCSI_TRC_START;
+
+	switch (entry->fmt) {
+	case VIOSRP_SRP_FORMAT:
+		entry->op_code = vscsi_cmd->opcode;
+		entry->tag = vscsi_cmd->tag;
+		switch (entry->op_code) {
+		case SRP_CMD:
+			entry->u.start.scsi_opcode = vscsi_cmd->cdb[0];
+			entry->u.start.scsi_lun = scsilun_to_int(&vscsi_cmd->lun);
+			entry->u.start.xfer_len = scsi_bufflen(evt->cmnd);
+			break;
+		case SRP_TSK_MGMT:
+			entry->u.start.scsi_lun = scsilun_to_int(&vscsi_cmd->lun);
+			entry->u.start.task_func = ((struct srp_tsk_mgmt *)vscsi_cmd)->tsk_mgmt_func;
+			entry->u.start.task_tag = ((struct srp_tsk_mgmt *)vscsi_cmd)->task_tag;
+			break;
+		default:
+			break;
+		}
+		break;
+	case VIOSRP_MAD_FORMAT:
+		entry->op_code = mad->type;
+		entry->tag = mad->tag;
+		break;
+	default:
+		break;
+	}
+}
+
+static void ibmvscsi_trc_end(struct srp_event_struct *evt)
+{
+	struct ibmvscsi_host_data *vhost = evt->hostdata;
+	struct srp_rsp *vscsi_cmd = &evt->xfer_iu->srp.rsp;
+	struct mad_common *mad = &evt->xfer_iu->mad.common;
+	struct ibmvscsi_trace_entry *entry = &vhost->trace[vhost->trace_index++];
+
+	entry->evt = evt;
+	entry->mftb = mftb();
+	entry->time = jiffies;
+	entry->fmt = evt->crq.format;
+	entry->type = IBMVSCSI_TRC_END;
+
+	switch (entry->fmt) {
+	case VIOSRP_SRP_FORMAT:
+		entry->op_code = vscsi_cmd->opcode;
+		entry->tag = vscsi_cmd->tag;
+		switch (entry->op_code) {
+		case SRP_RSP:
+			entry->u.end.status = vscsi_cmd->status;
+			entry->u.end.flags = vscsi_cmd->flags;
+			if (evt->cmnd)
+				entry->u.end.cmnd_result = evt->cmnd->result;
+			break;
+		case SRP_LOGIN_REJ:
+		case SRP_T_LOGOUT:
+			entry->u.end.reason = be32_to_cpu(((struct srp_login_rej *)vscsi_cmd)->reason);
+			break;
+		default:
+			break;
+		}
+		break;
+	case VIOSRP_MAD_FORMAT:
+		entry->op_code = mad->type;
+		entry->u.end.status = mad->status;
+		break;
+	default:
+		break;
+	}
+}
 
 /* ------------------------------------------------------------
  * Routines for managing the command/response queue
@@ -805,13 +889,16 @@ static void purge_requests(struct ibmvscsi_host_data *hostdata, int error_code)
 		spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 		if (evt->cmnd) {
 			evt->cmnd->result = (error_code << 16);
+			ibmvscsi_trc_end(evt);
 			unmap_cmd_data(&evt->iu.srp.cmd, evt,
 				       evt->hostdata->dev);
 			if (evt->cmnd_done)
 				evt->cmnd_done(evt->cmnd);
 		} else if (evt->done && evt->crq.format != VIOSRP_MAD_FORMAT &&
-			   evt->iu.srp.login_req.opcode != SRP_LOGIN_REQ)
+			   evt->iu.srp.login_req.opcode != SRP_LOGIN_REQ) {
+			ibmvscsi_trc_end(evt);
 			evt->done(evt);
+		}
 		free_event_struct(&evt->hostdata->pool, evt);
 		spin_lock_irqsave(hostdata->host->host_lock, flags);
 	}
@@ -956,6 +1043,8 @@ static int ibmvscsi_send_srp_event(struct srp_event_struct *evt_struct,
 			atomic_inc(&hostdata->request_limit);
 		goto send_error;
 	}
+
+	ibmvscsi_trc_start(evt_struct);
 
 	return 0;
 
@@ -1835,6 +1924,7 @@ static void ibmvscsi_handle_crq(struct viosrp_crq *crq,
 			   &hostdata->request_limit);
 
 	del_timer(&evt_struct->timer);
+	ibmvscsi_trc_end(evt_struct);
 
 	if ((crq->status != VIOSRP_OK && crq->status != VIOSRP_OK2) && evt_struct->cmnd)
 		evt_struct->cmnd->result = DID_ERROR << 16;
@@ -1894,6 +1984,39 @@ static int ibmvscsi_change_queue_depth(struct scsi_device *sdev, int qdepth)
 /* ------------------------------------------------------------
  * sysfs attributes
  */
+static ssize_t ibmvscsi_read_trace(struct file *filp, struct kobject *kobj,
+				   struct bin_attribute *bin_attr,
+				   char *buf, loff_t off, size_t count)
+{
+	struct device *dev = container_of(kobj, struct device, kobj);
+	struct Scsi_Host *shost = class_to_shost(dev);
+	struct ibmvscsi_host_data *vhost = shost_priv(shost);
+	unsigned long flags = 0;
+	int size = IBMVSCSI_TRACE_SIZE;
+	char *src = (char *)vhost->trace;
+
+	if (off > size)
+		return 0;
+	if (off + count > size) {
+		size -= off;
+		count = size;
+	}
+
+	spin_lock_irqsave(shost->host_lock, flags);
+	memcpy(buf, &src[off], count);
+	spin_unlock_irqrestore(shost->host_lock, flags);
+	return count;
+}
+
+static struct bin_attribute ibmvscsi_trace_attr = {
+	.attr = {
+		.name = "trace",
+		.mode = S_IRUGO,
+	},
+	.size = 0,
+	.read = ibmvscsi_read_trace,
+};
+
 static ssize_t show_host_vhost_loc(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
@@ -2207,6 +2330,9 @@ static int ibmvscsi_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 		goto persist_bufs_failed;
 	}
 
+	hostdata->trace = kcalloc(IBMVSCSI_NUM_TRACE_ENTRIES,
+				  sizeof(struct ibmvscsi_trace_entry), GFP_KERNEL);
+
 	hostdata->work_thread = kthread_run(ibmvscsi_work, hostdata, "%s_%d",
 					    "ibmvscsi", host->host_no);
 
@@ -2237,6 +2363,12 @@ static int ibmvscsi_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 
 	if (scsi_add_host(hostdata->host, hostdata->dev))
 		goto add_host_failed;
+
+	if ((rc = ibmvscsi_create_trace_file(&host->shost_dev.kobj,
+					     &ibmvscsi_trace_attr))) {
+		dev_err(dev, "Failed to create trace file. rc=%d\n", rc);
+		goto add_srp_port_failed;
+	}
 
 	/* we don't have a proper target_port_id so let's use the fake one */
 	memcpy(ids.port_id, hostdata->madapter_info.partition_name,
@@ -2303,6 +2435,7 @@ static int ibmvscsi_remove(struct vio_dev *vdev)
 	purge_requests(hostdata, DID_ERROR);
 
 	spin_lock_irqsave(hostdata->host->host_lock, flags);
+
 	release_event_pool(&hostdata->pool, hostdata);
 	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 
@@ -2311,6 +2444,8 @@ static int ibmvscsi_remove(struct vio_dev *vdev)
 
 	kthread_stop(hostdata->work_thread);
 	unmap_persist_bufs(hostdata);
+
+	ibmvscsi_remove_trace_file(&hostdata->host->shost_dev.kobj, &ibmvscsi_trace_attr);
 
 	spin_lock(&ibmvscsi_driver_lock);
 	list_del(&hostdata->host_list);

@@ -88,6 +88,37 @@ struct event_pool {
 	dma_addr_t iu_token;
 };
 
+struct ibmvscsi_trace_start_entry {
+	u8 scsi_opcode;
+	u32 scsi_lun;
+	u32 xfer_len;
+	u8 task_func;
+	u64 task_tag;
+}__attribute__((packed));
+
+struct ibmvscsi_trace_end_entry {
+	u32 cmnd_result;
+	u8 status;
+	u8 flags;
+	u32 reason;
+}__attribute__((packed));
+
+struct ibmvscsi_trace_entry {
+	struct srp_event_struct *evt;
+	u64 mftb;
+	u32 time;
+	u32 fmt;
+	u8 op_code;
+	u64 tag;
+	u8 type;
+#define IBMVSCSI_TRC_START	0x00
+#define IBMVSCSI_TRC_END	0xff
+	union {
+		struct ibmvscsi_trace_start_entry start;
+		struct ibmvscsi_trace_end_entry end;
+	} u;
+}__attribute__((packed, aligned (8)));
+
 /* all driver data associated with a host adapter */
 struct ibmvscsi_host_data {
 	struct list_head host_list;
@@ -107,6 +138,14 @@ struct ibmvscsi_host_data {
 	struct capabilities caps;
 	dma_addr_t caps_addr;
 	dma_addr_t adapter_info_addr;
+#define IBMVSCSI_NUM_TRACE_INDEX_BITS		8
+#define IBMVSCSI_NUM_TRACE_ENTRIES		(1 << IBMVSCSI_NUM_TRACE_INDEX_BITS)
+#define IBMVSCSI_TRACE_SIZE	(sizeof(struct ibmvscsi_trace_entry) * IBMVSCSI_NUM_TRACE_ENTRIES)
+	struct ibmvscsi_trace_entry *trace;
+	u32 trace_index:IBMVSCSI_NUM_TRACE_INDEX_BITS;
 };
+
+#define ibmvscsi_create_trace_file(kobj, attr) sysfs_create_bin_file(kobj, attr)
+#define ibmvscsi_remove_trace_file(kobj, attr) sysfs_remove_bin_file(kobj, attr)
 
 #endif				/* IBMVSCSI_H */

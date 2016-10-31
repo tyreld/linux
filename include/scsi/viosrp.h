@@ -198,6 +198,7 @@ union mad_iu {
 	struct viosrp_adapter_info adapter_info;
 	struct viosrp_fast_fail fast_fail;
 	struct viosrp_capabilities capabilities;
+	struct mad_common common;
 };
 
 union viosrp_iu {
