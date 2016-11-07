@@ -2330,8 +2330,12 @@ static int ibmvscsi_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 		goto persist_bufs_failed;
 	}
 
+/*
 	hostdata->trace = kcalloc(IBMVSCSI_NUM_TRACE_ENTRIES,
 				  sizeof(struct ibmvscsi_trace_entry), GFP_KERNEL);
+*/
+
+	hostdata->trace = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, 2);
 
 	hostdata->work_thread = kthread_run(ibmvscsi_work, hostdata, "%s_%d",
 					    "ibmvscsi", host->host_no);

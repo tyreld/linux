@@ -117,6 +117,7 @@ struct ibmvscsi_trace_entry {
 		struct ibmvscsi_trace_start_entry start;
 		struct ibmvscsi_trace_end_entry end;
 	} u;
+	u8 reserved[8];
 }__attribute__((packed, aligned (8)));
 
 /* all driver data associated with a host adapter */
@@ -138,7 +139,7 @@ struct ibmvscsi_host_data {
 	struct capabilities caps;
 	dma_addr_t caps_addr;
 	dma_addr_t adapter_info_addr;
-#define IBMVSCSI_NUM_TRACE_INDEX_BITS		8
+#define IBMVSCSI_NUM_TRACE_INDEX_BITS		12
 #define IBMVSCSI_NUM_TRACE_ENTRIES		(1 << IBMVSCSI_NUM_TRACE_INDEX_BITS)
 #define IBMVSCSI_TRACE_SIZE	(sizeof(struct ibmvscsi_trace_entry) * IBMVSCSI_NUM_TRACE_ENTRIES)
 	struct ibmvscsi_trace_entry *trace;
