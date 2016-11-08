@@ -129,9 +129,10 @@ static void ibmvscsi_trc_start(struct srp_event_struct *evt)
 	struct ibmvscsi_host_data *vhost = evt->hostdata;
 	struct srp_cmd *vscsi_cmd = &evt->iu.srp.cmd;
 	struct mad_common *mad = &evt->iu.mad.common;
-	struct ibmvscsi_trace_entry *entry;
+	struct ibmvscsi_trace_entry *entry = &vhost->trace[vhost->trace_index++];
 
-	entry = &vhost->trace[vhost->trace_index++];
+	memset(entry, 0, sizeof(struct ibmvscsi_trace_entry));
+
 	entry->evt = evt;
 	entry->mftb = mftb();
 	entry->time = jiffies;
@@ -173,6 +174,8 @@ static void ibmvscsi_trc_end(struct srp_event_struct *evt)
 	struct mad_common *mad = &evt->xfer_iu->mad.common;
 	struct ibmvscsi_trace_entry *entry = &vhost->trace[vhost->trace_index++];
 
+	memset(entry, 0, sizeof(struct ibmvscsi_trace_entry));
+
 	entry->evt = evt;
 	entry->mftb = mftb();
 	entry->time = jiffies;
@@ -184,6 +187,10 @@ static void ibmvscsi_trc_end(struct srp_event_struct *evt)
 		entry->op_code = vscsi_cmd->opcode;
 		entry->tag = vscsi_cmd->tag;
 		switch (entry->op_code) {
+		case SRP_CMD:
+			if (evt->cmnd)
+				entry->u.end.cmnd_result = evt->cmnd->result;
+			break;
 		case SRP_RSP:
 			entry->u.end.status = vscsi_cmd->status;
 			entry->u.end.flags = vscsi_cmd->flags;
