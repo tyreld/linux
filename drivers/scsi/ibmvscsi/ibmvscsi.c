@@ -139,6 +139,8 @@ static void ibmvscsi_trc_start(struct srp_event_struct *evt)
 	entry->fmt = evt->crq.format;
 	entry->type = IBMVSCSI_TRC_START;
 
+	memcpy(entry->srp_data, vscsi_cmd, 64);
+
 	switch (entry->fmt) {
 	case VIOSRP_SRP_FORMAT:
 		entry->op_code = vscsi_cmd->opcode;
@@ -181,6 +183,8 @@ static void ibmvscsi_trc_end(struct srp_event_struct *evt)
 	entry->time = jiffies;
 	entry->fmt = evt->crq.format;
 	entry->type = IBMVSCSI_TRC_END;
+
+	memcpy(entry->srp_data, vscsi_cmd, 64);
 
 	switch (entry->fmt) {
 	case VIOSRP_SRP_FORMAT:
