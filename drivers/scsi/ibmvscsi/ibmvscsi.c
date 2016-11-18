@@ -2364,7 +2364,7 @@ static int ibmvscsi_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 				  sizeof(struct ibmvscsi_trace_entry), GFP_KERNEL);
 */
 
-	hostdata->trace = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, 2);
+	hostdata->trace = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, 3);
 
 	hostdata->work_thread = kthread_run(ibmvscsi_work, hostdata, "%s_%d",
 					    "ibmvscsi", host->host_no);
