@@ -218,6 +218,23 @@ static void ibmvscsi_trc_end(struct srp_event_struct *evt)
 	}
 }
 
+static void ibmvscsi_trc_dup(struct srp_event_struct *evt)
+{
+        struct ibmvscsi_host_data *vhost = evt->hostdata;
+        struct srp_rsp *vscsi_cmd = &evt->xfer_iu->srp.rsp;
+        struct ibmvscsi_trace_entry *entry = &vhost->trace[vhost->trace_index++];
+
+        memset(entry, 0, sizeof(struct ibmvscsi_trace_entry));
+
+        entry->evt = evt;
+        entry->mftb = mftb();
+        entry->time = jiffies;
+        entry->fmt = evt->crq.format;
+        entry->type = IBMVSCSI_TRC_DUP;
+
+        memcpy(entry->srp_data, vscsi_cmd, 64);
+}
+
 /* ------------------------------------------------------------
  * Routines for managing the command/response queue
  */
@@ -1927,6 +1944,7 @@ static void ibmvscsi_handle_crq(struct viosrp_crq *crq,
 	if (atomic_read(&evt_struct->free)) {
 		dev_err(hostdata->dev, "received duplicate correlation_token 0x%p!\n",
 			evt_struct);
+		ibmvscsi_trc_dup(evt_struct);
 		return;
 	}
 

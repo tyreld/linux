@@ -112,6 +112,7 @@ struct ibmvscsi_trace_entry {
 	u64 tag;
 	u8 type;
 #define IBMVSCSI_TRC_START	0x00
+#define IBMVSCSI_TRC_DUP	0x08
 #define IBMVSCSI_TRC_END	0xff
 	union {
 		struct ibmvscsi_trace_start_entry start;
