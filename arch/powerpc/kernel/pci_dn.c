@@ -483,7 +483,7 @@ static void *add_pdn(struct device_node *dn, void *data)
  */
 void pci_devs_phb_init_dynamic(struct pci_controller *phb)
 {
-	struct device_node *dn = phb->dn;
+	struct device_node *dn = of_node_get(phb->dn);
 	struct pci_dn *pdn;
 
 	/* PHB nodes themselves must not match */
@@ -497,6 +497,7 @@ void pci_devs_phb_init_dynamic(struct pci_controller *phb)
 
 	/* Update dn->phb ptrs for new phb and children devices */
 	pci_traverse_device_nodes(dn, add_pdn, phb);
+	of_node_put(dn);
 }
 
 /** 

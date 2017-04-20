@@ -1682,7 +1682,7 @@ void pcibios_scan_phb(struct pci_controller *hose)
 {
 	LIST_HEAD(resources);
 	struct pci_bus *bus;
-	struct device_node *node = hose->dn;
+	struct device_node *node = of_node_get(hose->dn);
 	int mode;
 
 	pr_debug("PCI: Scanning PHB %pOF\n", node);
@@ -1705,6 +1705,7 @@ void pcibios_scan_phb(struct pci_controller *hose)
 		pr_err("Failed to create bus for PCI domain %04x\n",
 			hose->global_number);
 		pci_free_resource_list(&resources);
+		of_node_put(node);
 		return;
 	}
 	hose->bus = bus;
@@ -1716,6 +1717,8 @@ void pcibios_scan_phb(struct pci_controller *hose)
 	pr_debug("    probe mode: %d\n", mode);
 	if (mode == PCI_PROBE_DEVTREE)
 		of_scan_bus(node, bus);
+
+	of_node_put(node);
 
 	if (mode == PCI_PROBE_NORMAL) {
 		pci_bus_update_busn_res_end(bus, 255);
