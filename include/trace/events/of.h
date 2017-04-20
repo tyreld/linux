@@ -23,7 +23,7 @@ DECLARE_EVENT_CLASS(of_node_ref_template,
 		__entry->refcount = refcount;
 	),
 
-	TP_printk("refcount=%d, dn->full_name=%s",
+	TP_printk("refcount=%d, dn_name=%s",
 		  __entry->refcount, __get_str(dn_name))
 );
 
@@ -51,7 +51,7 @@ TRACE_EVENT(of_node_release,
 		__entry->flags = dn->_flags;
 	),
 
-	TP_printk("dn->full_name=%s, dn->_flags=%lu", 
+	TP_printk("dn_name=%s, flags=%lu", 
 		  __get_str(dn_name), __entry->flags)
 );
 
@@ -82,7 +82,7 @@ TRACE_EVENT(of_reconfig_notify,
 		__assign_str(oldprop_name, ord->old_prop ? ord->old_prop->name : "null");
 	),
 
-	TP_printk("action=%s, dn->full_name=%s, prop->name=%s, old_prop->name=%s",
+	TP_printk("action=%s, dn_name=%s, prop_name=%s, oldprop_name=%s",
 		  __print_symbolic(__entry->action, of_reconfig_action_names),
 		  __get_str(dn_name), __get_str(prop_name), __get_str(oldprop_name))
 );
