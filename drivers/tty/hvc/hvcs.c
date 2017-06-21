@@ -701,6 +701,8 @@ static void hvcs_destruct_port(struct tty_port *p)
 	struct vio_dev *vdev;
 	unsigned long flags;
 
+	pr_info("hvcs_destruct_port: hvcsd->index %d, hvcsd->port.count %d\n", hvcsd->index, hvcsd->port.count);
+
 	spin_lock(&hvcs_structs_lock);
 	spin_lock_irqsave(&hvcsd->lock, flags);
 
@@ -843,6 +845,8 @@ static int hvcs_remove(struct vio_dev *dev)
 
 	if (!hvcsd)
 		return -ENODEV;
+
+	pr_info("hvcs_remove: hvcsd->port-count %d\n", hvcsd->port.count);
 
 	/* By this time the vty-server won't be getting any more interrupts */
 
@@ -1105,6 +1109,8 @@ static int hvcs_install(struct tty_driver *driver, struct tty_struct *tty)
 	unsigned int irq;
 	int retval;
 
+	pr_info("hvcs_install: tty->index %d\n", tty->index);
+
 	/*
 	 * Is there a vty-server that shares the same index?
 	 * This function increments the kref index.
@@ -1176,8 +1182,17 @@ err_put:
  */
 static int hvcs_open(struct tty_struct *tty, struct file *filp)
 {
-	struct hvcs_struct *hvcsd = tty->driver_data;
+	struct hvcs_struct *hvcsd;
 	unsigned long flags;
+
+        hvcsd = hvcs_get_by_index(tty->index);
+        if (!hvcsd) {
+                printk(KERN_WARNING "HVCS: open failed, no device associated"
+                                " with tty->index %d.\n", tty->index);
+                return -ENODEV;
+        }
+
+	pr_info("hvcs_open: tty->index %d, hvcsd->port.count %d\n", tty->index, hvcsd->port.count + 1);
 
 	spin_lock_irqsave(&hvcsd->lock, flags);
 	hvcsd->port.count++;
@@ -1198,6 +1213,8 @@ static void hvcs_close(struct tty_struct *tty, struct file *filp)
 	unsigned long flags;
 	int irq;
 
+	pr_info("hvcs_close: tty->index %d\n", tty->index);
+
 	/*
 	 * Is someone trying to close the file associated with this device after
 	 * we have hung up?  If so tty->driver_data wouldn't be valid.
@@ -1215,6 +1232,9 @@ static void hvcs_close(struct tty_struct *tty, struct file *filp)
 
 	hvcsd = tty->driver_data;
 
+	pr_info("hvcs_close: hvcsd->port.count %d\n", hvcsd->port.count - 1);
+
+	tty_port_put(&hvcsd->port);
 	spin_lock_irqsave(&hvcsd->lock, flags);
 	if (--hvcsd->port.count == 0) {
 
@@ -1237,7 +1257,7 @@ static void hvcs_close(struct tty_struct *tty, struct file *filp)
 		 * device needs to be re-configured the next time hvcs_open is
 		 * called.
 		 */
-		tty->driver_data = NULL;
+		/* tty->driver_data = NULL; */
 
 		free_irq(irq, hvcsd);
 		return;
@@ -1254,6 +1274,8 @@ static void hvcs_cleanup(struct tty_struct * tty)
 {
 	struct hvcs_struct *hvcsd = tty->driver_data;
 
+	pr_info("hvcs_cleanup: tty->index %d\n", tty->index);
+
 	tty_port_put(&hvcsd->port);
 }
 
@@ -1263,6 +1285,8 @@ static void hvcs_hangup(struct tty_struct * tty)
 	unsigned long flags;
 	int temp_open_count;
 	int irq;
+
+	pr_info("hvcs_hangup: tty->index %d, hvcsd->port.count %d\n", tty->index, hvcsd->port.count);
 
 	spin_lock_irqsave(&hvcsd->lock, flags);
 	/* Preserve this so that we know how many kref refs to put */
@@ -1278,7 +1302,7 @@ static void hvcs_hangup(struct tty_struct * tty)
 	hvcsd->todo_mask = 0;
 
 	/* I don't think the tty needs the hvcs_struct pointer after a hangup */
-	tty->driver_data = NULL;
+	/* tty->driver_data = NULL; */
 	hvcsd->port.tty = NULL;
 
 	hvcsd->port.count = 0;
