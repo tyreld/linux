@@ -137,8 +137,13 @@ static irqreturn_t ibmvscsi_handle_event(int irq, void *dev_instance)
 {
 	struct ibmvscsi_host_data *hostdata =
 	    (struct ibmvscsi_host_data *)dev_instance;
+	unsigned long flags;
+
+	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	vio_disable_interrupts(to_vio_dev(hostdata->dev));
 	tasklet_schedule(&hostdata->srp_task);
+	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
+
 	return IRQ_HANDLED;
 }
 
@@ -226,8 +231,10 @@ static void ibmvscsi_task(void *data)
 	struct ibmvscsi_host_data *hostdata = (struct ibmvscsi_host_data *)data;
 	struct vio_dev *vdev = to_vio_dev(hostdata->dev);
 	struct viosrp_crq *crq;
+	unsigned long flags;
 	int done = 0;
 
+	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	while (!done) {
 		/* Pull all the valid messages off the CRQ */
 		while ((crq = crq_queue_next_crq(&hostdata->queue)) != NULL) {
@@ -247,6 +254,8 @@ static void ibmvscsi_task(void *data)
 			done = 1;
 		}
 	}
+
+	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 }
 
 static void gather_partition_info(void)
@@ -298,6 +307,7 @@ static int ibmvscsi_reset_crq_queue(struct crq_queue *queue,
 				    struct ibmvscsi_host_data *hostdata)
 {
 	int rc = 0;
+	unsigned long flags;
 	struct vio_dev *vdev = to_vio_dev(hostdata->dev);
 
 	/* Close the CRQ */
@@ -306,6 +316,8 @@ static int ibmvscsi_reset_crq_queue(struct crq_queue *queue,
 			msleep(100);
 		rc = plpar_hcall_norets(H_FREE_CRQ, vdev->unit_address);
 	} while ((rc == H_BUSY) || (H_IS_LONG_BUSY(rc)));
+
+	spin_lock_irqsave(hostdata->host->host_lock, flags);
 
 	/* Clean out the queue */
 	memset(queue->msgs, 0x00, PAGE_SIZE);
@@ -323,6 +335,8 @@ static int ibmvscsi_reset_crq_queue(struct crq_queue *queue,
 	} else if (rc != 0) {
 		dev_warn(hostdata->dev, "couldn't register crq--rc 0x%x\n", rc);
 	}
+	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
+
 	return rc;
 }
 
@@ -793,15 +807,12 @@ static int map_data_for_srp_cmd(struct scsi_cmnd *cmd,
 static void purge_requests(struct ibmvscsi_host_data *hostdata, int error_code)
 {
 	struct srp_event_struct *evt;
-	unsigned long flags;
 
-	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	while (!list_empty(&hostdata->sent)) {
 		evt = list_first_entry(&hostdata->sent, struct srp_event_struct, list);
 		list_del(&evt->list);
 		del_timer(&evt->timer);
 
-		spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 		if (evt->cmnd) {
 			evt->cmnd->result = (error_code << 16);
 			unmap_cmd_data(&evt->iu.srp.cmd, evt,
@@ -812,9 +823,7 @@ static void purge_requests(struct ibmvscsi_host_data *hostdata, int error_code)
 			   evt->iu.srp.login_req.opcode != SRP_LOGIN_REQ)
 			evt->done(evt);
 		free_event_struct(&evt->hostdata->pool, evt);
-		spin_lock_irqsave(hostdata->host->host_lock, flags);
 	}
-	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 }
 
 /**
@@ -823,12 +832,16 @@ static void purge_requests(struct ibmvscsi_host_data *hostdata, int error_code)
 */
 static void ibmvscsi_reset_host(struct ibmvscsi_host_data *hostdata)
 {
+	unsigned long flags;
+
 	scsi_block_requests(hostdata->host);
 	atomic_set(&hostdata->request_limit, 0);
 
+	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	purge_requests(hostdata, DID_ERROR);
 	hostdata->reset_crq = 1;
 	wake_up(&hostdata->work_wait_q);
+	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 }
 
 /**
@@ -1179,7 +1192,8 @@ static void login_rsp(struct srp_event_struct *evt_struct)
 		   be32_to_cpu(evt_struct->xfer_iu->srp.login_rsp.req_lim_delta));
 
 	/* If we had any pending I/Os, kick them */
-	scsi_unblock_requests(hostdata->host);
+	hostdata->unblock = 1;
+	wake_up(&hostdata->work_wait_q);
 }
 
 /**
@@ -1191,7 +1205,6 @@ static void login_rsp(struct srp_event_struct *evt_struct)
 static int send_srp_login(struct ibmvscsi_host_data *hostdata)
 {
 	int rc;
-	unsigned long flags;
 	struct srp_login_req *login;
 	struct srp_event_struct *evt_struct = get_event_struct(&hostdata->pool);
 
@@ -1206,7 +1219,6 @@ static int send_srp_login(struct ibmvscsi_host_data *hostdata)
 	login->req_buf_fmt = cpu_to_be16(SRP_BUF_FORMAT_DIRECT |
 					 SRP_BUF_FORMAT_INDIRECT);
 
-	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	/* Start out with a request limit of 0, since this is negotiated in
 	 * the login request we are just sending and login requests always
 	 * get sent by the driver regardless of request_limit.
@@ -1214,7 +1226,6 @@ static int send_srp_login(struct ibmvscsi_host_data *hostdata)
 	atomic_set(&hostdata->request_limit, 0);
 
 	rc = ibmvscsi_send_srp_event(evt_struct, hostdata, login_timeout * 2);
-	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 	dev_info(hostdata->dev, "sent SRP login\n");
 	return rc;
 };
@@ -1258,7 +1269,6 @@ static void send_mad_capabilities(struct ibmvscsi_host_data *hostdata)
 {
 	struct viosrp_capabilities *req;
 	struct srp_event_struct *evt_struct;
-	unsigned long flags;
 	struct device_node *of_node = hostdata->dev->of_node;
 	const char *location;
 
@@ -1310,10 +1320,8 @@ static void send_mad_capabilities(struct ibmvscsi_host_data *hostdata)
 		req->common.length = cpu_to_be16(sizeof(hostdata->caps) -
 						sizeof(hostdata->caps.reserve));
 
-	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	if (ibmvscsi_send_srp_event(evt_struct, hostdata, info_timeout * 2))
 		dev_err(hostdata->dev, "couldn't send CAPABILITIES_REQ!\n");
-	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 };
 
 /**
@@ -1347,7 +1355,6 @@ static void fast_fail_rsp(struct srp_event_struct *evt_struct)
 static int enable_fast_fail(struct ibmvscsi_host_data *hostdata)
 {
 	int rc;
-	unsigned long flags;
 	struct viosrp_fast_fail *fast_fail_mad;
 	struct srp_event_struct *evt_struct;
 
@@ -1366,9 +1373,7 @@ static int enable_fast_fail(struct ibmvscsi_host_data *hostdata)
 	fast_fail_mad->common.type = cpu_to_be32(VIOSRP_ENABLE_FAST_FAIL);
 	fast_fail_mad->common.length = cpu_to_be16(sizeof(*fast_fail_mad));
 
-	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	rc = ibmvscsi_send_srp_event(evt_struct, hostdata, info_timeout * 2);
-	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 	return rc;
 }
 
@@ -1430,7 +1435,6 @@ static void send_mad_adapter_info(struct ibmvscsi_host_data *hostdata)
 {
 	struct viosrp_adapter_info *req;
 	struct srp_event_struct *evt_struct;
-	unsigned long flags;
 
 	evt_struct = get_event_struct(&hostdata->pool);
 	BUG_ON(!evt_struct);
@@ -1447,10 +1451,8 @@ static void send_mad_adapter_info(struct ibmvscsi_host_data *hostdata)
 	req->common.length = cpu_to_be16(sizeof(hostdata->madapter_info));
 	req->buffer = cpu_to_be64(hostdata->adapter_info_addr);
 
-	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	if (ibmvscsi_send_srp_event(evt_struct, hostdata, info_timeout * 2))
 		dev_err(hostdata->dev, "couldn't send ADAPTER_INFO_REQ!\n");
-	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 };
 
 /**
@@ -1763,7 +1765,6 @@ static void ibmvscsi_handle_crq(struct viosrp_crq *crq,
 				struct ibmvscsi_host_data *hostdata)
 {
 	long rc;
-	unsigned long flags;
 	/* The hypervisor copies our tag value here so no byteswapping */
 	struct srp_event_struct *evt_struct =
 			(__force struct srp_event_struct *)crq->IU_data_ptr;
@@ -1805,7 +1806,9 @@ static void ibmvscsi_handle_crq(struct viosrp_crq *crq,
 		} else {
 			dev_err(hostdata->dev, "Virtual adapter failed rc %d!\n",
 				crq->format);
-			ibmvscsi_reset_host(hostdata);
+		        purge_requests(hostdata, DID_ERROR);
+		        hostdata->reset_crq = 1;
+		        wake_up(&hostdata->work_wait_q);
 		}
 		return;
 	case VIOSRP_CRQ_CMD_RSP:		/* real payload */
@@ -1849,10 +1852,8 @@ static void ibmvscsi_handle_crq(struct viosrp_crq *crq,
 	 * Lock the host_lock before messing with these structures, since we
 	 * are running in a task context
 	 */
-	spin_lock_irqsave(evt_struct->hostdata->host->host_lock, flags);
 	list_del(&evt_struct->list);
 	free_event_struct(&evt_struct->hostdata->pool, evt_struct);
-	spin_unlock_irqrestore(evt_struct->hostdata->host->host_lock, flags);
 }
 
 /**
@@ -2108,26 +2109,37 @@ static unsigned long ibmvscsi_get_desired_dma(struct vio_dev *vdev)
 
 static void ibmvscsi_do_work(struct ibmvscsi_host_data *hostdata)
 {
+	unsigned long flags;
 	int rc;
 	char *action = "reset";
 
+	spin_lock_irqsave(hostdata->host->host_lock, flags);
 	if (hostdata->reset_crq) {
 		smp_rmb();
 		hostdata->reset_crq = 0;
 
+		spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 		rc = ibmvscsi_reset_crq_queue(&hostdata->queue, hostdata);
+		spin_lock_irqsave(hostdata->host->host_lock, flags);
 		if (!rc)
 			rc = ibmvscsi_send_crq(hostdata, 0xC001000000000000LL, 0);
 		vio_enable_interrupts(to_vio_dev(hostdata->dev));
 	} else if (hostdata->reenable_crq) {
 		smp_rmb();
-		action = "enable";
-		rc = ibmvscsi_reenable_crq_queue(&hostdata->queue, hostdata);
 		hostdata->reenable_crq = 0;
+		action = "enable";
+
+		spin_unlock_irqrestore(hostdata->host->host_lock, flags);
+		rc = ibmvscsi_reenable_crq_queue(&hostdata->queue, hostdata);
+		spin_lock_irqsave(hostdata->host->host_lock, flags);
 		if (!rc)
 			rc = ibmvscsi_send_crq(hostdata, 0xC001000000000000LL, 0);
+	} else if (hostdata->unblock) {
+		rc = hostdata->unblock = 0;
 	} else
 		return;
+
+	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
 
 	if (rc) {
 		atomic_set(&hostdata->request_limit, -1);
@@ -2137,7 +2149,7 @@ static void ibmvscsi_do_work(struct ibmvscsi_host_data *hostdata)
 	scsi_unblock_requests(hostdata->host);
 }
 
-static int ibmvscsi_work_to_do(struct ibmvscsi_host_data *hostdata)
+static int __ibmvscsi_work_to_do(struct ibmvscsi_host_data *hostdata)
 {
 	if (kthread_should_stop())
 		return 1;
@@ -2147,9 +2159,23 @@ static int ibmvscsi_work_to_do(struct ibmvscsi_host_data *hostdata)
 	} else if (hostdata->reenable_crq) {
 		smp_rmb();
 		return 1;
+	} else if (hostdata->unblock) {
+		smp_rmb();
+		return 1;
 	}
 
 	return 0;
+}
+
+static int ibmvscsi_work_to_do(struct ibmvscsi_host_data *hostdata)
+{
+	unsigned long flags;
+	int rc;
+
+	spin_lock_irqsave(hostdata->host->host_lock, flags);
+	rc = __ibmvscsi_work_to_do(hostdata);
+	spin_unlock_irqrestore(hostdata->host->host_lock, flags);
+	return rc;
 }
 
 static int ibmvscsi_work(void *data)

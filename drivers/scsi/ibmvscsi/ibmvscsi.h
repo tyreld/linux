@@ -95,6 +95,7 @@ struct ibmvscsi_host_data {
 	int client_migrated;
 	int reset_crq;
 	int reenable_crq;
+	int unblock;
 	struct device *dev;
 	struct event_pool pool;
 	struct crq_queue queue;
