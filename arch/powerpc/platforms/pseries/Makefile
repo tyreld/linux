@@ -14,6 +14,7 @@ obj-$(CONFIG_PSERIES_ENERGY)	+= pseries_energy.o
 
 obj-$(CONFIG_HOTPLUG_CPU)	+= hotplug-cpu.o
 obj-$(CONFIG_MEMORY_HOTPLUG)	+= hotplug-memory.o
+obj-$(CONFIG_HOTPLUG_PCI)	+= hotplug-pci.o
 
 obj-$(CONFIG_HVC_CONSOLE)	+= hvconsole.o
 obj-$(CONFIG_HVCS)		+= hvcserver.o
