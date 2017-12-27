@@ -139,13 +139,104 @@ static struct drc_info *pci_drc_info_from_index(u32 drc_index)
 	return NULL;
 }
 
-int dlpar_pci(struct pseries_hp_errorlog *hp_elog)
+static int dlpar_pci_release(struct drc_info *drc)
+{
+	int retlevel, rc;
+
+	rc = rtas_set_indicator(ISOLATION_STATE, drc->index, ISOLATE);
+	if (rc)
+		return rc;
+
+	rc = rtas_set_power_level(drc->power, POWER_OFF, &retlevel);
+	if (rc || (retlevel != POWER_OFF))
+		return (rc ? rc : retlevel);
+
+	return 0;
+}
+
+static int dlpar_pci_remove(struct drc_info *drc)
 {
 	int rc;
+
+	pr_debug("Attempting to remove PCI %s, drc index: %x\n",
+		 drc->dn->name, drc->index);
+
+	rc = dlpar_pci_release(drc);
+	if (rc) {
+		pr_warn("Failed to release PCI %s, drc index: %x\n",
+			drc->dn->name, drc->index);
+		return rc;
+	}
+
+	rc = dlpar_detach_node(drc->dn);
+	if (rc) {
+		pr_warn("Failed to detach PCI %s, drc index: %x\n",
+			drc->dn->name, drc->index);
+		return rc;
+	}
+
+	pr_debug("Successfully removed PCI, drc index: %x\n", drc->index);
+	return 0;
+}
+
+static struct device_node *pci_drc_index_to_dn(u32 drc_index)
+{
+	struct device_node *phb_dn;
+	struct device_node *php_dn = NULL;
+	u32 my_index;
+	int rc;
+
+	for_each_node_by_name(phb_dn, "pci") {
+		for_each_child_of_node(phb_dn, php_dn) {
+			rc = of_property_read_u32(php_dn, "ibm,my-drc-index", &my_index);
+			if (rc)
+				continue;
+
+			if (my_index == drc_index)
+				break;
+		}
+	}
+
+	if (phb_dn)
+		of_node_put(phb_dn);
+
+	return php_dn;
+}
+
+static int dlpar_pci_remove_by_index(u32 drc_index)
+{
+	struct drc_info *drc;
+	int rc;
+
+	drc = pci_drc_info_from_index(drc_index);
+	if (!drc->dn) {
+		pr_warn("Cannot find PCI slot (drc index %x) to remove\n",
+			drc_index);
+		return -ENODEV;
+	}
+
+	rc = dlpar_pci_remove(drc);
+	dealloc_drc_info(drc);
+
+	return rc;
+}
+
+int dlpar_pci(struct pseries_hp_errorlog *hp_elog)
+{
+	u32 drc_index;
+	int rc;
+
+	drc_index = hp_elog->_drc_u.drc_index;
 
 	lock_device_hotplug();
 
 	switch (hp_elog->action) {
+	case PSERIES_HP_ELOG_ACTION_REMOVE:
+		if (hp_elog->id_type == PSERIES_HP_ELOG_ID_DRC_INDEX)
+			rc = dlpar_pci_remove_by_index(drc_index);
+		else
+			rc = -EINVAL;
+		break;
 	default:
 		pr_err("Invalid action (%d) specified\n", hp_elog->action);
 		rc = -EINVAL;
