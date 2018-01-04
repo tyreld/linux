@@ -154,6 +154,16 @@ static int dlpar_pci_release(struct drc_info *drc)
 	return 0;
 }
 
+static int dlpar_pci_add(struct drc_info *drc)
+{
+	int pow_state, iso_state;
+	int rc;
+
+	rc = pci_check_card_present(drc, &pow_state, &iso_state);
+
+	return 0;
+}
+
 static int dlpar_pci_remove(struct drc_info *drc)
 {
 	int rc;
@@ -203,6 +213,29 @@ static struct device_node *pci_drc_index_to_dn(u32 drc_index)
 	return php_dn;
 }
 
+static int dlpar_pci_add_by_index(u32 drc_index)
+{
+	struct drc_info *drc;
+	int rc;
+
+	drc = pci_drc_info_from_index(drc_index);
+	if (!drc) {
+		pr_warn("Cannot find hotpluggable PCI slot (drc index %x)\n", drc_index);
+		return -EINVAL;
+	}
+
+	if (drc->dn) {
+		pr_warn("PCI slot (drc index %x) is already present and cannot be added\n",
+			drc_index);
+		return -EINVAL;
+	}
+
+	rc = dlpar_pci_add(drc);
+	dealloc_drc_info(drc);
+
+	return 0;
+}
+
 static int dlpar_pci_remove_by_index(u32 drc_index)
 {
 	struct drc_info *drc;
@@ -231,6 +264,12 @@ int dlpar_pci(struct pseries_hp_errorlog *hp_elog)
 	lock_device_hotplug();
 
 	switch (hp_elog->action) {
+	case PSERIES_HP_ELOG_ACTION_ADD:
+		if (hp_elog->id_type == PSERIES_HP_ELOG_ID_DRC_INDEX)
+			rc = dlpar_pci_add_by_index(drc_index);
+		else
+			rc = -EINVAL;
+		break;
 	case PSERIES_HP_ELOG_ACTION_REMOVE:
 		if (hp_elog->id_type == PSERIES_HP_ELOG_ID_DRC_INDEX)
 			rc = dlpar_pci_remove_by_index(drc_index);
