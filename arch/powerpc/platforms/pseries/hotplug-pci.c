@@ -189,30 +189,6 @@ static int dlpar_pci_remove(struct drc_info *drc)
 	return 0;
 }
 
-static struct device_node *pci_drc_index_to_dn(u32 drc_index)
-{
-	struct device_node *phb_dn;
-	struct device_node *php_dn = NULL;
-	u32 my_index;
-	int rc;
-
-	for_each_node_by_name(phb_dn, "pci") {
-		for_each_child_of_node(phb_dn, php_dn) {
-			rc = of_property_read_u32(php_dn, "ibm,my-drc-index", &my_index);
-			if (rc)
-				continue;
-
-			if (my_index == drc_index)
-				break;
-		}
-	}
-
-	if (phb_dn)
-		of_node_put(phb_dn);
-
-	return php_dn;
-}
-
 static int dlpar_pci_add_by_index(u32 drc_index)
 {
 	struct drc_info *drc;
