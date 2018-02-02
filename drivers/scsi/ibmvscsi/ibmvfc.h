@@ -27,6 +27,7 @@
 #include <linux/list.h>
 #include <linux/types.h>
 #include <scsi/viosrp.h>
+#include <scsi/fc/fc_fcp.h>
 
 #define IBMVFC_NAME	"ibmvfc"
 #define IBMVFC_DRIVER_VERSION		"1.0.11"
@@ -359,43 +360,14 @@ struct ibmvfc_tmf {
 	__be64 reserved[2];
 }__attribute__((packed, aligned (8)));
 
-enum ibmvfc_fcp_rsp_info_codes {
-	RSP_NO_FAILURE		= 0x00,
-	RSP_TMF_REJECTED		= 0x04,
-	RSP_TMF_FAILED		= 0x05,
-	RSP_TMF_INVALID_LUN	= 0x09,
-};
-
-struct ibmvfc_fcp_rsp_info {
-	u8 reserved[3];
-	u8 rsp_code;
-	u8 reserved2[4];
-}__attribute__((packed, aligned (2)));
-
-enum ibmvfc_fcp_rsp_flags {
-	FCP_BIDI_RSP			= 0x80,
-	FCP_BIDI_READ_RESID_UNDER	= 0x40,
-	FCP_BIDI_READ_RESID_OVER	= 0x20,
-	FCP_CONF_REQ			= 0x10,
-	FCP_RESID_UNDER			= 0x08,
-	FCP_RESID_OVER			= 0x04,
-	FCP_SNS_LEN_VALID			= 0x02,
-	FCP_RSP_LEN_VALID			= 0x01,
-};
-
 union ibmvfc_fcp_rsp_data {
-	struct ibmvfc_fcp_rsp_info info;
-	u8 sense[SCSI_SENSE_BUFFERSIZE + sizeof(struct ibmvfc_fcp_rsp_info)];
+	struct fcp_resp_rsp_info info;
+	u8 sense[SCSI_SENSE_BUFFERSIZE + sizeof(struct fcp_resp_rsp_info)];
 }__attribute__((packed, aligned (8)));
 
 struct ibmvfc_fcp_rsp {
-	__be64 reserved;
-	__be16 retry_delay_timer;
-	u8 flags;
-	u8 scsi_status;
-	__be32 fcp_resid;
-	__be32 fcp_sense_len;
-	__be32 fcp_rsp_len;
+	struct fcp_resp resp;
+	struct fcp_resp_ext ext;
 	union ibmvfc_fcp_rsp_data data;
 }__attribute__((packed, aligned (8)));
 
@@ -407,31 +379,6 @@ enum ibmvfc_cmd_flags {
 	IBMVFC_TMF			= 0x0080,
 	IBMVFC_CLASS_3_ERR	= 0x0100,
 };
-
-enum ibmvfc_fc_task_attr {
-	IBMVFC_SIMPLE_TASK	= 0x00,
-	IBMVFC_HEAD_OF_QUEUE	= 0x01,
-	IBMVFC_ORDERED_TASK	= 0x02,
-	IBMVFC_ACA_TASK		= 0x04,
-};
-
-enum ibmvfc_fc_tmf_flags {
-	IBMVFC_ABORT_TASK_SET	= 0x02,
-	IBMVFC_LUN_RESET		= 0x10,
-	IBMVFC_TARGET_RESET	= 0x20,
-};
-
-struct ibmvfc_fcp_cmd_iu {
-	struct scsi_lun lun;
-	u8 crn;
-	u8 pri_task_attr;
-	u8 tmf_flags;
-	u8 add_cdb_len;
-#define IBMVFC_RDDATA		0x02
-#define IBMVFC_WRDATA		0x01
-	u8 cdb[IBMVFC_MAX_CDB_LEN];
-	__be32 xfer_len;
-}__attribute__((packed, aligned (4)));
 
 struct ibmvfc_cmd {
 	__be64 task_tag;
@@ -453,7 +400,7 @@ struct ibmvfc_cmd {
 	__be64 tgt_scsi_id;
 	__be64 tag;
 	__be64 reserved3[2];
-	struct ibmvfc_fcp_cmd_iu iu;
+	struct fcp_cmnd iu;
 	struct ibmvfc_fcp_rsp rsp;
 }__attribute__((packed, aligned (8)));
 
