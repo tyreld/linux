@@ -101,7 +101,7 @@ void chrp_show_cpuinfo(struct seq_file *m)
 	struct device_node *root;
 	const char *model = "";
 
-	root = of_find_node_by_path("/");
+	root = of_node_get(of_root);
 	if (root)
 		model = of_get_property(root, "model", NULL);
 	seq_printf(m, "machine\t\t: CHRP %s\n", model);
@@ -197,7 +197,7 @@ static void __init sio_init(void)
 	struct device_node *root;
 	const char *model;
 
-	root = of_find_node_by_path("/");
+	root = of_node_get(of_root);
 	if (!root)
 		return;
 
@@ -264,7 +264,7 @@ static __init void chrp_init(void)
 	/* find the boot console from /chosen/stdout */
 	if (!of_chosen)
 		return;
-	node = of_find_node_by_path("/");
+	node = of_node_get(of_root);
 	if (!node)
 		return;
 	property = of_get_property(node, "model", NULL);
@@ -301,7 +301,7 @@ out_put:
 
 void __init chrp_setup_arch(void)
 {
-	struct device_node *root = of_find_node_by_path("/");
+	struct device_node *root = of_node_get(of_root);
 	const char *machine = NULL;
 
 	/* init to some ~sane value until calibrate_delay() runs */
@@ -391,7 +391,7 @@ static void __init chrp_find_openpic(void)
 	np = of_find_node_by_type(NULL, "open-pic");
 	if (np == NULL)
 		return;
-	root = of_find_node_by_path("/");
+	root = of_node_get(of_root);
 	if (root) {
 		opprop = of_get_property(root, "platform-open-pic", &oplen);
 		na = of_n_addr_cells(root);

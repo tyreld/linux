@@ -189,7 +189,7 @@ setup_python(struct pci_controller *hose, struct device_node *dev)
 /* Marvell Discovery II based Pegasos 2 */
 static void __init setup_peg2(struct pci_controller *hose, struct device_node *dev)
 {
-	struct device_node *root = of_find_node_by_path("/");
+	struct device_node *root = of_node_get(of_root);
 	struct device_node *rtas;
 
 	rtas = of_find_node_by_name (root, "rtas");
@@ -214,7 +214,7 @@ chrp_find_bridges(void)
 	const unsigned int *dma;
 	const char *model, *machine;
 	int is_longtrail = 0, is_mot = 0, is_pegasos = 0;
-	struct device_node *root = of_find_node_by_path("/");
+	struct device_node *root = of_node_get(of_root);
 	struct resource r;
 	/*
 	 * The PCI host bridge nodes on some machines don't have
