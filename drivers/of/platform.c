@@ -409,7 +409,7 @@ int of_platform_bus_probe(struct device_node *root,
 	struct device_node *child;
 	int rc = 0;
 
-	root = root ? of_node_get(root) : of_find_node_by_path("/");
+	root = root ? of_node_get(root) : of_node_get(of_root);
 	if (!root)
 		return -EINVAL;
 
@@ -461,7 +461,7 @@ int of_platform_populate(struct device_node *root,
 	struct device_node *child;
 	int rc = 0;
 
-	root = root ? of_node_get(root) : of_find_node_by_path("/");
+	root = root ? of_node_get(root) : of_node_get(of_root);
 	if (!root)
 		return -EINVAL;
 

@@ -455,7 +455,7 @@ int of_machine_is_compatible(const char *compat)
 	struct device_node *root;
 	int rc = 0;
 
-	root = of_find_node_by_path("/");
+	root = of_node_get(of_root);
 	if (root) {
 		rc = of_device_is_compatible(root, compat);
 		of_node_put(root);
