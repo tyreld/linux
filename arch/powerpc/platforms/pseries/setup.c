@@ -83,7 +83,7 @@ static void pSeries_show_cpuinfo(struct seq_file *m)
 	struct device_node *root;
 	const char *model = "";
 
-	root = of_find_node_by_path("/");
+	root = of_node_get(of_root);
 	if (root)
 		model = of_get_property(root, "model", NULL);
 	seq_printf(m, "machine\t\t: CHRP %s\n", model);
@@ -434,7 +434,7 @@ static void __init find_and_init_phbs(void)
 {
 	struct device_node *node;
 	struct pci_controller *phb;
-	struct device_node *root = of_find_node_by_path("/");
+	struct device_node *root = of_node_get(of_root);
 
 	for_each_child_of_node(root, node) {
 		if (node->type == NULL || (strcmp(node->type, "pci") != 0 &&

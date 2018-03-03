@@ -182,7 +182,7 @@ static int ibmebus_create_devices(const struct of_device_id *matches)
 	struct device *dev;
 	int ret = 0;
 
-	root = of_find_node_by_path("/");
+	root = of_node_get(of_root);
 
 	for_each_child_of_node(root, child) {
 		if (!of_match_node(matches, child))

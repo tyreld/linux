@@ -170,7 +170,7 @@ static u32 lookup_lmb_associativity_index(struct drmem_lmb *lmb)
 	const u32 *lmb_assoc;
 	u32 aa_index;
 
-	parent = of_find_node_by_path("/");
+	parent = of_node_get(of_root);
 	if (!parent)
 		return -ENODEV;
 

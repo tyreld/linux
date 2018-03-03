@@ -197,7 +197,7 @@ static void parse_ppp_data(struct seq_file *m)
 	 * valid if the ibm,partition-performance-parameters-level
 	 * property is >= 1.
 	 */
-	root = of_find_node_by_path("/");
+	root = of_node_get(of_root);
 	if (root) {
 		perf_level = of_get_property(root,
 				"ibm,partition-performance-parameters-level",
@@ -661,7 +661,7 @@ static int lparcfg_data(struct seq_file *m, void *v)
 
 	seq_printf(m, "%s %s\n", MODULE_NAME, MODULE_VERS);
 
-	rootdn = of_find_node_by_path("/");
+	rootdn = of_node_get(of_root);
 	if (rootdn) {
 		tmp = of_get_property(rootdn, "model", NULL);
 		if (tmp)
