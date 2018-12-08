@@ -51,7 +51,7 @@
 /* #define LPARCFG_DEBUG */
 
 /*
- * Track sum of all purrs across all processors. This is used to further
+ * Track sum of purrs across all processors. This is used to further
  * calculate usage values by different applications
  */
 static void cpu_get_purr(void *arg)
@@ -475,6 +475,7 @@ static int pseries_lparcfg_data(struct seq_file *m, void *v)
 		splpar_dispatch_data(m);
 
 		seq_printf(m, "purr=%ld\n", get_purr());
+        seq_printf(m, "tbr=%ld\n", mftb());
 	} else {		/* non SPLPAR case */
 
 		seq_printf(m, "system_active_processors=%d\n",
