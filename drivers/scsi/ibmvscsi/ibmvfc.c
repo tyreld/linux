@@ -1676,9 +1676,10 @@ static struct ibmvfc_cmd *ibmvfc_init_vfc_cmd(struct ibmvfc_event *evt, struct s
 	size_t offset;
 
 	memset(vfc_cmd, 0, sizeof(*vfc_cmd));
-	if (be64_to_cpu(vhost->login_buf->resp.capabilities) & IBMVFC_HANDLE_VF_WWPN)
+	if (be64_to_cpu(vhost->login_buf->resp.capabilities) & IBMVFC_HANDLE_VF_WWPN) {
 		offset = offsetof(struct ibmvfc_cmd, v2.rsp);
-	else
+		vfc_cmd->targetWWPN = cpu_to_be64(rport->port_name);
+	} else
 		offset = offsetof(struct ibmvfc_cmd, v1.rsp);
 	vfc_cmd->resp.va = cpu_to_be64(be64_to_cpu(evt->crq.ioba) + offset);
 	vfc_cmd->resp.len = cpu_to_be32(sizeof(*rsp));
@@ -2053,6 +2054,7 @@ out:
 static int ibmvfc_reset_device(struct scsi_device *sdev, int type, char *desc)
 {
 	struct ibmvfc_host *vhost = shost_priv(sdev->host);
+	struct fc_rport *rport = starget_to_rport(scsi_target(sdev));
 	struct ibmvfc_cmd *tmf;
 	struct ibmvfc_event *evt = NULL;
 	union ibmvfc_iu rsp_iu;
@@ -2070,6 +2072,8 @@ static int ibmvfc_reset_device(struct scsi_device *sdev, int type, char *desc)
 		iu = ibmvfc_get_fcp_iu(vhost, tmf);
 
 		tmf->flags = cpu_to_be16((IBMVFC_NO_MEM_DESC | IBMVFC_TMF));
+		if (be64_to_cpu(vhost->login_buf->resp.capabilities) & IBMVFC_HANDLE_VF_WWPN)
+			tmf->targetWWPN = cpu_to_be64(rport->port_name);
 		iu->tmf_flags = type;
 		evt->sync_iu = &rsp_iu;
 
@@ -2260,7 +2264,12 @@ static int ibmvfc_cancel_all(struct scsi_device *sdev, int type)
 
 		tmf = &evt->iu.tmf;
 		memset(tmf, 0, sizeof(*tmf));
-		tmf->common.version = cpu_to_be32(1);
+		if (be64_to_cpu(vhost->login_buf->resp.capabilities) & IBMVFC_HANDLE_VF_WWPN) {
+			tmf->common.version = cpu_to_be32(2);
+			tmf->targetWWPN = cpu_to_be64(found_evt->tgt->wwpn);
+		} else {
+			tmf->common.version = cpu_to_be32(1);
+		}
 		tmf->common.opcode = cpu_to_be32(IBMVFC_TMF_MAD);
 		tmf->common.length = cpu_to_be16(sizeof(*tmf));
 		tmf->scsi_id = cpu_to_be64(rport->port_id);
@@ -2360,6 +2369,7 @@ static int ibmvfc_match_evt(struct ibmvfc_event *evt, void *match)
 static int ibmvfc_abort_task_set(struct scsi_device *sdev)
 {
 	struct ibmvfc_host *vhost = shost_priv(sdev->host);
+	struct fc_rport *rport = starget_to_rport(scsi_target(sdev));
 	struct ibmvfc_cmd *tmf;
 	struct ibmvfc_event *evt, *found_evt;
 	union ibmvfc_iu rsp_iu;
@@ -2391,6 +2401,8 @@ static int ibmvfc_abort_task_set(struct scsi_device *sdev)
 		tmf = ibmvfc_init_vfc_cmd(evt, sdev);
 		iu = ibmvfc_get_fcp_iu(vhost, tmf);
 
+		if (be64_to_cpu(vhost->login_buf->resp.capabilities) & IBMVFC_HANDLE_VF_WWPN)
+			tmf->targetWWPN = cpu_to_be64(rport->port_name);
 		iu->tmf_flags = IBMVFC_ABORT_TASK_SET;
 		tmf->flags = cpu_to_be16((IBMVFC_NO_MEM_DESC | IBMVFC_TMF));
 		evt->sync_iu = &rsp_iu;
@@ -3470,7 +3482,12 @@ static void ibmvfc_tgt_send_prli(struct ibmvfc_target *tgt)
 	evt->tgt = tgt;
 	prli = &evt->iu.prli;
 	memset(prli, 0, sizeof(*prli));
-	prli->common.version = cpu_to_be32(1);
+	if (be64_to_cpu(vhost->login_buf->resp.capabilities) & IBMVFC_HANDLE_VF_WWPN) {
+		prli->common.version = cpu_to_be32(2);
+		prli->targetWWPN = cpu_to_be64(tgt->wwpn);
+	} else {
+		prli->common.version = cpu_to_be32(1);
+	}
 	prli->common.opcode = cpu_to_be32(IBMVFC_PROCESS_LOGIN);
 	prli->common.length = cpu_to_be16(sizeof(*prli));
 	prli->scsi_id = cpu_to_be64(tgt->scsi_id);
@@ -3573,7 +3590,12 @@ static void ibmvfc_tgt_send_plogi(struct ibmvfc_target *tgt)
 	evt->tgt = tgt;
 	plogi = &evt->iu.plogi;
 	memset(plogi, 0, sizeof(*plogi));
-	plogi->common.version = cpu_to_be32(1);
+	if(be64_to_cpu(vhost->login_buf->resp.capabilities) & IBMVFC_HANDLE_VF_WWPN) {
+		plogi->common.version = cpu_to_be32(2);
+		plogi->targetWWPN = cpu_to_be64(tgt->wwpn);
+	} else {
+		plogi->common.version = cpu_to_be32(1);
+	}
 	plogi->common.opcode = cpu_to_be32(IBMVFC_PORT_LOGIN);
 	plogi->common.length = cpu_to_be16(sizeof(*plogi));
 	plogi->scsi_id = cpu_to_be64(tgt->scsi_id);
@@ -3973,7 +3995,12 @@ static void ibmvfc_adisc_timeout(struct timer_list *t)
 	evt->tgt = tgt;
 	tmf = &evt->iu.tmf;
 	memset(tmf, 0, sizeof(*tmf));
-	tmf->common.version = cpu_to_be32(1);
+	if (be64_to_cpu(vhost->login_buf->resp.capabilities) & IBMVFC_HANDLE_VF_WWPN) {
+		tmf->common.version = cpu_to_be32(2);
+		tmf->targetWWPN = cpu_to_be64(tgt->wwpn);
+	} else {
+		tmf->common.version = cpu_to_be32(1);
+	}
 	tmf->common.opcode = cpu_to_be32(IBMVFC_TMF_MAD);
 	tmf->common.length = cpu_to_be16(sizeof(*tmf));
 	tmf->scsi_id = cpu_to_be64(tgt->scsi_id);
