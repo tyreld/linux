@@ -656,6 +656,29 @@ struct ibmvfc_crq_queue {
 	dma_addr_t msg_token;
 };
 
+struct ibmvfc_sub_crq {
+	struct ibmvfc_crq crq;
+	__be64 reserved[2];
+} __packed __aligned(8);
+
+struct ibmvfc_sub_queue {
+	struct ibmvfc_sub_crq *msgs;
+	dma_addr_t msg_token;
+	int size, cur;
+	struct ibmvfc_host *vhost;
+	unsigned long cookie;
+	unsigned long vios_cookie;
+	unsigned long hw_irq;
+	unsigned long irq;
+	unsigned long hwq_id;
+	char name[32];
+};
+
+struct ibmvfc_scsi_channels {
+	struct ibmvfc_sub_queue *scrqs;
+	unsigned int active_queues;
+};
+
 enum ibmvfc_ae_link_state {
 	IBMVFC_AE_LS_LINK_UP		= 0x01,
 	IBMVFC_AE_LS_LINK_BOUNCED	= 0x02,
