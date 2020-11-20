@@ -701,6 +701,15 @@ static int ibmvfc_send_crq(struct ibmvfc_host *vhost, u64 word1, u64 word2)
 	return plpar_hcall_norets(H_SEND_CRQ, vdev->unit_address, word1, word2);
 }
 
+static int ibmvfc_send_sub_crq(struct ibmvfc_host *vhost, u64 cookie, u64 word1,
+			       u64 word2, u64 word3, u64 word4)
+{
+	struct vio_dev *vdev = to_vio_dev(vhost->dev);
+
+	return plpar_hcall_norets(H_SEND_SUB_CRQ, vdev->unit_address, cookie,
+				  word1, word2, word3, word4);
+}
+
 /**
  * ibmvfc_send_crq_init - Send a CRQ init message
  * @vhost:	ibmvfc host struct
@@ -1513,15 +1522,19 @@ static int ibmvfc_send_event(struct ibmvfc_event *evt,
 			     struct ibmvfc_host *vhost, unsigned long timeout)
 {
 	__be64 *crq_as_u64 = (__be64 *) &evt->crq;
+	int channel_cmd = 0;
 	int rc;
 
 	/* Copy the IU into the transfer area */
 	*evt->xfer_iu = evt->iu;
-	if (evt->crq.format == IBMVFC_CMD_FORMAT)
+	if (evt->crq.format == IBMVFC_CMD_FORMAT) {
 		evt->xfer_iu->cmd.tag = cpu_to_be64((u64)evt);
-	else if (evt->crq.format == IBMVFC_MAD_FORMAT)
+		channel_cmd = 1;
+	} else if (evt->crq.format == IBMVFC_MAD_FORMAT) {
 		evt->xfer_iu->mad_common.tag = cpu_to_be64((u64)evt);
-	else
+		if (evt->xfer_iu->mad_common.opcode == IBMVFC_TMF_MAD)
+			channel_cmd = 1;
+	} else
 		BUG();
 
 	list_add_tail(&evt->queue, &vhost->sent);
@@ -1534,8 +1547,17 @@ static int ibmvfc_send_event(struct ibmvfc_event *evt,
 
 	mb();
 
-	if ((rc = ibmvfc_send_crq(vhost, be64_to_cpu(crq_as_u64[0]),
-				  be64_to_cpu(crq_as_u64[1])))) {
+	if (vhost->using_channels && channel_cmd)
+		rc = ibmvfc_send_sub_crq(vhost,
+					 vhost->scsi_scrqs.scrqs[evt->hwq].vios_cookie,
+					 be64_to_cpu(crq_as_u64[0]),
+					 be64_to_cpu(crq_as_u64[1]),
+					 0, 0);
+	else
+		rc = ibmvfc_send_crq(vhost, be64_to_cpu(crq_as_u64[0]),
+				     be64_to_cpu(crq_as_u64[1]));
+
+	if (rc) {
 		list_del(&evt->queue);
 		del_timer(&evt->timer);
 
