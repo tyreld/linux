@@ -793,6 +793,8 @@ static int ibmvfc_reset_crq(struct ibmvfc_host *vhost)
 	unsigned long flags;
 	struct vio_dev *vdev = to_vio_dev(vhost->dev);
 	struct ibmvfc_crq_queue *crq = &vhost->crq;
+	struct ibmvfc_sub_queue *scrq;
+	int i;
 
 	/* Close the CRQ */
 	do {
@@ -808,6 +810,14 @@ static int ibmvfc_reset_crq(struct ibmvfc_host *vhost)
 	/* Clean out the queue */
 	memset(crq->msgs, 0, PAGE_SIZE);
 	crq->cur = 0;
+
+	if (vhost->scsi_scrqs.scrqs) {
+		for (i = 0; i < IBMVFC_SCSI_HW_QUEUES; i++) {
+			scrq = &vhost->scsi_scrqs.scrqs[i];
+			memset(scrq->msgs, 0, PAGE_SIZE);
+			scrq->cur = 0;
+		}
+	}
 
 	/* And re-open it again */
 	rc = plpar_hcall_norets(H_REG_CRQ, vdev->unit_address,
@@ -4983,6 +4993,118 @@ map_failed:
 	return retrc;
 }
 
+static int ibmvfc_register_scsi_channel(struct ibmvfc_host *vhost,
+				  int index)
+{
+	struct device *dev = vhost->dev;
+	struct vio_dev *vdev = to_vio_dev(dev);
+	struct ibmvfc_sub_queue *scrq = &vhost->scsi_scrqs.scrqs[index];
+	int rc = -ENOMEM;
+
+	ENTER;
+
+	scrq->msgs = (struct ibmvfc_sub_crq *)get_zeroed_page(GFP_KERNEL);
+	if (!scrq->msgs)
+		return rc;
+
+	scrq->size = PAGE_SIZE / sizeof(*scrq->msgs);
+	scrq->msg_token = dma_map_single(dev, scrq->msgs, PAGE_SIZE,
+					 DMA_BIDIRECTIONAL);
+
+	if (dma_mapping_error(dev, scrq->msg_token))
+		goto dma_map_failed;
+
+	rc = h_reg_sub_crq(vdev->unit_address, scrq->msg_token, PAGE_SIZE,
+			   &scrq->cookie, &scrq->hw_irq);
+
+	if (rc) {
+		dev_warn(dev, "Error registering sub-crq: %d\n", rc);
+		if (rc == H_PARAMETER)
+			dev_warn_once(dev, "Firmware may not support MQ\n");
+		goto reg_failed;
+	}
+
+	scrq->hwq_id = index;
+	scrq->vhost = vhost;
+
+	LEAVE;
+	return 0;
+
+reg_failed:
+	dma_unmap_single(dev, scrq->msg_token, PAGE_SIZE, DMA_BIDIRECTIONAL);
+dma_map_failed:
+	free_page((unsigned long)scrq->msgs);
+	LEAVE;
+	return rc;
+}
+
+static void ibmvfc_deregister_scsi_channel(struct ibmvfc_host *vhost, int index)
+{
+	struct device *dev = vhost->dev;
+	struct vio_dev *vdev = to_vio_dev(dev);
+	struct ibmvfc_sub_queue *scrq = &vhost->scsi_scrqs.scrqs[index];
+	long rc;
+
+	ENTER;
+
+	do {
+		rc = plpar_hcall_norets(H_FREE_SUB_CRQ, vdev->unit_address,
+					scrq->cookie);
+	} while (rc == H_BUSY || H_IS_LONG_BUSY(rc));
+
+	if (rc)
+		dev_err(dev, "Failed to free sub-crq[%d]: rc=%ld\n", index, rc);
+
+	dma_unmap_single(dev, scrq->msg_token, PAGE_SIZE, DMA_BIDIRECTIONAL);
+	free_page((unsigned long)scrq->msgs);
+	LEAVE;
+}
+
+static int ibmvfc_init_sub_crqs(struct ibmvfc_host *vhost)
+{
+	int i, j;
+
+	ENTER;
+
+	vhost->scsi_scrqs.scrqs = kcalloc(IBMVFC_SCSI_HW_QUEUES,
+					  sizeof(*vhost->scsi_scrqs.scrqs),
+					  GFP_KERNEL);
+	if (!vhost->scsi_scrqs.scrqs)
+		return -1;
+
+	for (i = 0; i < IBMVFC_SCSI_HW_QUEUES; i++) {
+		if (ibmvfc_register_scsi_channel(vhost, i)) {
+			for (j = i; j > 0; j--)
+				ibmvfc_deregister_scsi_channel(vhost, j - 1);
+			kfree(vhost->scsi_scrqs.scrqs);
+			vhost->scsi_scrqs.scrqs = NULL;
+			vhost->scsi_scrqs.active_queues = 0;
+			LEAVE;
+			return -1;
+		}
+	}
+
+	LEAVE;
+	return 0;
+}
+
+static void ibmvfc_release_sub_crqs(struct ibmvfc_host *vhost)
+{
+	int i;
+
+	ENTER;
+	if (!vhost->scsi_scrqs.scrqs)
+		return;
+
+	for (i = 0; i < IBMVFC_SCSI_HW_QUEUES; i++)
+		ibmvfc_deregister_scsi_channel(vhost, i);
+
+	kfree(vhost->scsi_scrqs.scrqs);
+	vhost->scsi_scrqs.scrqs = NULL;
+	vhost->scsi_scrqs.active_queues = 0;
+	LEAVE;
+}
+
 /**
  * ibmvfc_free_mem - Free memory for vhost
  * @vhost:	ibmvfc host struct
@@ -5239,6 +5361,12 @@ static int ibmvfc_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 		goto remove_shost;
 	}
 
+	if (vhost->mq_enabled) {
+		rc = ibmvfc_init_sub_crqs(vhost);
+		if (rc)
+			dev_warn(dev, "Failed to allocate Sub-CRQs. rc=%d\n", rc);
+	}
+
 	if (shost_to_fc_host(shost)->rqst_q)
 		blk_queue_max_segments(shost_to_fc_host(shost)->rqst_q, 1);
 	dev_set_drvdata(dev, vhost);
@@ -5296,6 +5424,7 @@ static int ibmvfc_remove(struct vio_dev *vdev)
 	ibmvfc_purge_requests(vhost, DID_ERROR);
 	spin_unlock_irqrestore(vhost->host->host_lock, flags);
 	ibmvfc_free_event_pool(vhost);
+	ibmvfc_release_sub_crqs(vhost);
 
 	ibmvfc_free_mem(vhost);
 	spin_lock(&ibmvfc_driver_lock);
