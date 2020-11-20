@@ -3461,6 +3461,16 @@ static void ibmvfc_drain_sub_crq(struct ibmvfc_sub_queue *scrq)
 	spin_unlock_irqrestore(scrq->vhost->host->host_lock, flags);
 }
 
+static irqreturn_t ibmvfc_interrupt_scsi(int irq, void *scrq_instance)
+{
+	struct ibmvfc_sub_queue *scrq = (struct ibmvfc_sub_queue *)scrq_instance;
+
+	ibmvfc_toggle_scrq_irq(scrq, 0);
+	ibmvfc_drain_sub_crq(scrq);
+
+	return IRQ_HANDLED;
+}
+
 /**
  * ibmvfc_init_tgt - Set the next init job step for the target
  * @tgt:		ibmvfc target struct
