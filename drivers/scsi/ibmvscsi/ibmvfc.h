@@ -584,6 +584,24 @@ struct ibmvfc_connection_info {
 	__be64 reserved[16];
 } __packed __aligned(8);
 
+union ibmvfc_iu {
+	struct ibmvfc_mad_common mad_common;
+	struct ibmvfc_npiv_login_mad npiv_login;
+	struct ibmvfc_npiv_logout_mad npiv_logout;
+	struct ibmvfc_discover_targets discover_targets;
+	struct ibmvfc_port_login plogi;
+	struct ibmvfc_process_login prli;
+	struct ibmvfc_move_login move_login;
+	struct ibmvfc_query_tgt query_tgt;
+	struct ibmvfc_implicit_logout implicit_logout;
+	struct ibmvfc_tmf tmf;
+	struct ibmvfc_cmd cmd;
+	struct ibmvfc_passthru_mad passthru;
+	struct ibmvfc_channel_enquiry channel_enquiry;
+	struct ibmvfc_channel_setup_mad channel_setup;
+	struct ibmvfc_connection_info connection_info;
+} __packed __aligned(8);
+
 struct ibmvfc_trace_start_entry {
 	u32 xfer_len;
 } __packed;
@@ -666,6 +684,8 @@ struct ibmvfc_sub_queue {
 	dma_addr_t msg_token;
 	int size, cur;
 	struct ibmvfc_host *vhost;
+	struct ibmvfc_event *cancel_event;
+	union ibmvfc_iu cancel_rsp;
 	unsigned long cookie;
 	unsigned long vios_cookie;
 	unsigned long hw_irq;
@@ -711,24 +731,6 @@ struct ibmvfc_async_crq_queue {
 	int size, cur;
 	dma_addr_t msg_token;
 };
-
-union ibmvfc_iu {
-	struct ibmvfc_mad_common mad_common;
-	struct ibmvfc_npiv_login_mad npiv_login;
-	struct ibmvfc_npiv_logout_mad npiv_logout;
-	struct ibmvfc_discover_targets discover_targets;
-	struct ibmvfc_port_login plogi;
-	struct ibmvfc_process_login prli;
-	struct ibmvfc_move_login move_login;
-	struct ibmvfc_query_tgt query_tgt;
-	struct ibmvfc_implicit_logout implicit_logout;
-	struct ibmvfc_tmf tmf;
-	struct ibmvfc_cmd cmd;
-	struct ibmvfc_passthru_mad passthru;
-	struct ibmvfc_channel_enquiry channel_enquiry;
-	struct ibmvfc_channel_setup_mad channel_setup;
-	struct ibmvfc_connection_info connection_info;
-} __packed __aligned(8);
 
 enum ibmvfc_target_action {
 	IBMVFC_TGT_ACTION_NONE = 0,

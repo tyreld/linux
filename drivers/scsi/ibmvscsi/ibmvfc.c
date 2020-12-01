@@ -2339,67 +2339,103 @@ static int ibmvfc_cancel_all(struct scsi_device *sdev, int type)
 {
 	struct ibmvfc_host *vhost = shost_priv(sdev->host);
 	struct ibmvfc_event *evt, *found_evt;
-	union ibmvfc_iu rsp;
-	int rsp_rc = -EBUSY;
+	struct ibmvfc_sub_queue *scrqs;
+	struct ibmvfc_sub_queue legacy_crq;
+	int rsp_rc = 0;
 	unsigned long flags;
 	u16 status;
+	int cancel_cnt = 0;
+	int num_hwq;
+	int ret = 0;
+	int i;
 
 	ENTER;
 	spin_lock_irqsave(vhost->host->host_lock, flags);
-	found_evt = NULL;
-	list_for_each_entry(evt, &vhost->sent, queue) {
-		if (evt->cmnd && evt->cmnd->device == sdev) {
-			found_evt = evt;
+	if (vhost->using_channels && vhost->scsi_scrqs.active_queues) {
+		num_hwq = vhost->scsi_scrqs.active_queues;
+		scrqs = vhost->scsi_scrqs.scrqs;
+	} else {
+		/* Use ibmvfc_sub_queue on the stack to fake legacy CRQ as a subqueue */
+		num_hwq = 1;
+		scrqs = &legacy_crq;
+	}
+
+	for (i = 0; i < num_hwq; i++) {
+		scrqs[i].cancel_event = NULL;
+		found_evt = NULL;
+		list_for_each_entry(evt, &vhost->sent, queue) {
+			if (evt->cmnd && evt->cmnd->device == sdev && evt->hwq == i) {
+				found_evt = evt;
+				cancel_cnt++;
+				break;
+			}
+		}
+
+		if (!found_evt)
+			continue;
+
+		if (vhost->logged_in) {
+			scrqs[i].cancel_event = ibmvfc_init_tmf(vhost, sdev, type);
+			scrqs[i].cancel_event->hwq = i;
+			scrqs[i].cancel_event->sync_iu = &scrqs[i].cancel_rsp;
+			rsp_rc = ibmvfc_send_event(scrqs[i].cancel_event, vhost, default_timeout);
+			if (rsp_rc)
+				break;
+		} else {
+			rsp_rc = -EBUSY;
 			break;
 		}
 	}
 
-	if (!found_evt) {
+	spin_unlock_irqrestore(vhost->host->host_lock, flags);
+
+	if (!cancel_cnt) {
 		if (vhost->log_level > IBMVFC_DEFAULT_LOG_LEVEL)
 			sdev_printk(KERN_INFO, sdev, "No events found to cancel\n");
-		spin_unlock_irqrestore(vhost->host->host_lock, flags);
 		return 0;
 	}
-
-	if (vhost->logged_in) {
-		evt = ibmvfc_init_tmf(vhost, sdev, type);
-		evt->sync_iu = &rsp;
-		rsp_rc = ibmvfc_send_event(evt, vhost, default_timeout);
-	}
-
-	spin_unlock_irqrestore(vhost->host->host_lock, flags);
 
 	if (rsp_rc != 0) {
 		sdev_printk(KERN_ERR, sdev, "Failed to send cancel event. rc=%d\n", rsp_rc);
 		/* If failure is received, the host adapter is most likely going
 		 through reset, return success so the caller will wait for the command
 		 being cancelled to get returned */
-		return 0;
+		goto free_events;
 	}
 
-	sdev_printk(KERN_INFO, sdev, "Cancelling outstanding commands.\n");
+        sdev_printk(KERN_INFO, sdev, "Cancelling outstanding commands.\n");
 
-	wait_for_completion(&evt->comp);
-	status = be16_to_cpu(rsp.mad_common.status);
-	spin_lock_irqsave(vhost->host->host_lock, flags);
-	ibmvfc_free_event(evt);
-	spin_unlock_irqrestore(vhost->host->host_lock, flags);
+	for (i = 0; i < num_hwq; i++) {
+		if (!scrqs[i].cancel_event)
+			continue;
 
-	if (status != IBMVFC_MAD_SUCCESS) {
-		sdev_printk(KERN_WARNING, sdev, "Cancel failed with rc=%x\n", status);
-		switch (status) {
-		case IBMVFC_MAD_DRIVER_FAILED:
-		case IBMVFC_MAD_CRQ_ERROR:
-			/* Host adapter most likely going through reset, return success to
-			 the caller will wait for the command being cancelled to get returned */
-			return 0;
-		default:
-			return -EIO;
-		};
+		wait_for_completion(&scrqs[i].cancel_event->comp);
+		status = be16_to_cpu(scrqs[i].cancel_rsp.mad_common.status);
+
+		if (status != IBMVFC_MAD_SUCCESS) {
+			sdev_printk(KERN_WARNING, sdev, "Cancel failed with rc=%x\n", status);
+			switch (status) {
+			case IBMVFC_MAD_DRIVER_FAILED:
+			case IBMVFC_MAD_CRQ_ERROR:
+				/* Host adapter most likely going through reset, return success to
+				 the caller will wait for the command being cancelled to get returned */
+				goto free_events;
+			default:
+				ret = -EIO;
+				goto free_events;
+			};
+		}
 	}
 
 	sdev_printk(KERN_INFO, sdev, "Successfully cancelled outstanding commands\n");
-	return 0;
+free_events:
+	spin_lock_irqsave(vhost->host->host_lock, flags);
+	for (i = 0; i < num_hwq; i++)
+		if (scrqs[i].cancel_event)
+			ibmvfc_free_event(scrqs[i].cancel_event);
+	spin_unlock_irqrestore(vhost->host->host_lock, flags);
+
+	return ret;
 }
 
 /**
