@@ -2969,6 +2969,7 @@ static void ibmvfc_handle_crq(struct ibmvfc_crq *crq, struct ibmvfc_host *vhost)
 {
 	long rc;
 	struct ibmvfc_event *evt = (struct ibmvfc_event *)be64_to_cpu(crq->ioba);
+	unsigned long flags;
 
 	switch (crq->valid) {
 	case IBMVFC_CRQ_INIT_RSP:
@@ -3039,7 +3040,12 @@ static void ibmvfc_handle_crq(struct ibmvfc_crq *crq, struct ibmvfc_host *vhost)
 	del_timer(&evt->timer);
 	list_del(&evt->queue);
 	ibmvfc_trc_end(evt);
-	evt->done(evt);
+	if (nr_scsi_hw_queues > 1) {
+		spin_unlock_irqrestore(vhost->host->host_lock, flags);
+		evt->done(evt);
+		spin_lock_irqsave(vhost->host->host_lock, flags);
+	} else
+		evt->done(evt);
 }
 
 /**
