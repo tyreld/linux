@@ -5118,19 +5118,31 @@ static void ibmvfc_npiv_logout_done(struct ibmvfc_event *evt)
 {
 	struct ibmvfc_host *vhost = evt->vhost;
 	u32 mad_status = be16_to_cpu(evt->xfer_iu->npiv_logout.common.status);
+	struct ibmvfc_queue *queues;
+	int empty = 1;
+	int i, q_size;
 
 	ibmvfc_free_event(evt);
 
+	if (vhost->mq_enabled && vhost->using_channels) {
+		queues = vhost->scsi_scrqs.scrqs;
+		q_size = vhost->scsi_scrqs.active_queues;
+	} else {
+		queues = &vhost->crq;
+		q_size = 1;
+	}
+
 	switch (mad_status) {
 	case IBMVFC_MAD_SUCCESS:
-		spin_lock(&vhost->crq.l_lock);
-		if (list_empty(&vhost->crq.sent) &&
-		    vhost->action == IBMVFC_HOST_ACTION_LOGO_WAIT) {
+		for (i = 0; i < q_size; i++) {
+			spin_lock(&queues[i].l_lock);
+			empty &= list_empty(&queues[i].sent);
+			spin_unlock(&queues[i].l_lock);
+		}
+		if (empty && vhost->action == IBMVFC_HOST_ACTION_LOGO_WAIT) {
 			ibmvfc_init_host(vhost);
-			spin_unlock(&vhost->crq.l_lock);
 			return;
 		}
-		spin_unlock(&vhost->crq.l_lock);
 		break;
 	case IBMVFC_MAD_FAILED:
 	case IBMVFC_MAD_NOT_SUPPORTED:
