@@ -5123,11 +5123,14 @@ static void ibmvfc_npiv_logout_done(struct ibmvfc_event *evt)
 
 	switch (mad_status) {
 	case IBMVFC_MAD_SUCCESS:
+		spin_lock(&vhost->crq.l_lock);
 		if (list_empty(&vhost->crq.sent) &&
 		    vhost->action == IBMVFC_HOST_ACTION_LOGO_WAIT) {
 			ibmvfc_init_host(vhost);
+			spin_unlock(&vhost->crq.l_lock);
 			return;
 		}
+		spin_unlock(&vhost->crq.l_lock);
 		break;
 	case IBMVFC_MAD_FAILED:
 	case IBMVFC_MAD_NOT_SUPPORTED:
