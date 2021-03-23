@@ -921,6 +921,8 @@ static int ibmvfc_reenable_crq_queue(struct ibmvfc_host *vhost)
 	spin_lock(vhost->crq.q_lock);
 	vhost->do_enquiry = 1;
 	vhost->using_channels = 0;
+	atomic_set(&vhost->xport_cnt, 0);
+	init_completion(&vhost->xport_comp);
 	spin_unlock(vhost->crq.q_lock);
 	spin_unlock_irqrestore(vhost->host->host_lock, flags);
 
@@ -958,6 +960,8 @@ static int ibmvfc_reset_crq(struct ibmvfc_host *vhost)
 	vhost->logged_in = 0;
 	vhost->do_enquiry = 1;
 	vhost->using_channels = 0;
+	atomic_set(&vhost->xport_cnt, 0);
+	init_completion(&vhost->xport_comp);
 
 	/* Clean out the queue */
 	memset(crq->msgs.crq, 0, PAGE_SIZE);
@@ -3208,17 +3212,17 @@ static void ibmvfc_handle_crq(struct ibmvfc_crq *crq, struct ibmvfc_host *vhost,
 		vhost->state = IBMVFC_NO_CRQ;
 		vhost->logged_in = 0;
 		ibmvfc_set_host_action(vhost, IBMVFC_HOST_ACTION_NONE);
+		if (atomic_inc_return(&vhost->xport_cnt) == (vhost->client_scsi_channels + 1))
+			complete(&vhost->xport_comp);
 		if (crq->format == IBMVFC_PARTITION_MIGRATED) {
 			/* We need to re-setup the interpartition connection */
 			dev_info(vhost->dev, "Partition migrated, Re-enabling adapter\n");
 			vhost->client_migrated = 1;
 			ibmvfc_link_down(vhost, IBMVFC_LINK_DOWN);
-			ibmvfc_purge_requests(vhost, DID_REQUEUE);
 			ibmvfc_set_host_action(vhost, IBMVFC_HOST_ACTION_REENABLE);
 		} else if (crq->format == IBMVFC_PARTNER_FAILED || crq->format == IBMVFC_PARTNER_DEREGISTER) {
 			dev_err(vhost->dev, "Host partner adapter deregistered or failed (rc=%d)\n", crq->format);
 			ibmvfc_link_down(vhost, IBMVFC_LINK_DOWN);
-			ibmvfc_purge_requests(vhost, DID_ERROR);
 			ibmvfc_set_host_action(vhost, IBMVFC_HOST_ACTION_RESET);
 		} else {
 			dev_err(vhost->dev, "Received unknown transport event from partner (rc=%d)\n", crq->format);
@@ -3753,6 +3757,9 @@ static void ibmvfc_handle_scrq(struct ibmvfc_crq *crq, struct ibmvfc_host *vhost
 	case IBMVFC_CRQ_CMD_RSP:
 		break;
 	case IBMVFC_CRQ_XPORT_EVENT:
+		if (atomic_inc_return(&vhost->xport_cnt) == (vhost->client_scsi_channels + 1))
+			complete(&vhost->xport_comp);
+		ibmvfc_dbg(vhost, "XPORT seen on sub-queue\n");
 		return;
 	default:
 		dev_err(vhost->dev, "Got and invalid message type 0x%02x\n", crq->valid);
@@ -5375,6 +5382,7 @@ static void ibmvfc_do_work(struct ibmvfc_host *vhost)
 {
 	struct ibmvfc_target *tgt;
 	unsigned long flags;
+	unsigned long xport_timeout = 5 * HZ;
 	struct fc_rport *rport;
 	LIST_HEAD(purge);
 	int rc;
@@ -5389,6 +5397,10 @@ static void ibmvfc_do_work(struct ibmvfc_host *vhost)
 		break;
 	case IBMVFC_HOST_ACTION_RESET:
 		vhost->action = IBMVFC_HOST_ACTION_TGT_DEL;
+		spin_unlock_irqrestore(vhost->host->host_lock, flags);
+		wait_for_completion_timeout(&vhost->xport_comp, xport_timeout);
+		spin_lock_irqsave(vhost->host->host_lock, flags);
+		ibmvfc_purge_requests(vhost, DID_ERROR);
 		list_splice_init(&vhost->purge, &purge);
 		spin_unlock_irqrestore(vhost->host->host_lock, flags);
 		ibmvfc_complete_purge(&purge);
@@ -5404,6 +5416,10 @@ static void ibmvfc_do_work(struct ibmvfc_host *vhost)
 		break;
 	case IBMVFC_HOST_ACTION_REENABLE:
 		vhost->action = IBMVFC_HOST_ACTION_TGT_DEL;
+		spin_unlock_irqrestore(vhost->host->host_lock, flags);
+		wait_for_completion_timeout(&vhost->xport_comp, xport_timeout);
+		spin_lock_irqsave(vhost->host->host_lock, flags);
+		ibmvfc_purge_requests(vhost, DID_REQUEUE);
 		list_splice_init(&vhost->purge, &purge);
 		spin_unlock_irqrestore(vhost->host->host_lock, flags);
 		ibmvfc_complete_purge(&purge);
@@ -6041,6 +6057,8 @@ static int ibmvfc_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 	init_waitqueue_head(&vhost->init_wait_q);
 	INIT_WORK(&vhost->rport_add_work_q, ibmvfc_rport_add_thread);
 	mutex_init(&vhost->passthru_mutex);
+	init_completion(&vhost->xport_comp);
+	atomic_set(&vhost->xport_cnt, 0);
 
 	if ((rc = ibmvfc_alloc_mem(vhost)))
 		goto free_scsi_host;
