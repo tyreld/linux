@@ -3588,6 +3588,15 @@ static ssize_t ibmvfc_show_host_capabilities(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%llx\n", be64_to_cpu(vhost->login_buf->resp.capabilities));
 }
 
+static ssize_t ibmvfc_show_sizeof(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "ibmvfc_iu=%lu, ibmvfc_event=%lu, "
+			"ibmvfc_queue=%lu, PAGE_SIZE=%lu\n", sizeof(union ibmvfc_iu),
+			sizeof(struct ibmvfc_event), sizeof(struct ibmvfc_queue),
+			PAGE_SIZE);
+}
+
 /**
  * ibmvfc_show_log_level - Show the adapter's error logging level
  * @dev:	class device struct
@@ -3674,6 +3683,7 @@ static DEVICE_ATTR(port_loc_code, S_IRUGO, ibmvfc_show_host_loc_code, NULL);
 static DEVICE_ATTR(drc_name, S_IRUGO, ibmvfc_show_host_drc_name, NULL);
 static DEVICE_ATTR(npiv_version, S_IRUGO, ibmvfc_show_host_npiv_version, NULL);
 static DEVICE_ATTR(capabilities, S_IRUGO, ibmvfc_show_host_capabilities, NULL);
+static DEVICE_ATTR(resource_sizes, S_IRUGO, ibmvfc_show_sizeof, NULL);
 static DEVICE_ATTR(log_level, S_IRUGO | S_IWUSR,
 		   ibmvfc_show_log_level, ibmvfc_store_log_level);
 static DEVICE_ATTR(nr_scsi_channels, S_IRUGO | S_IWUSR,
@@ -3733,6 +3743,7 @@ static struct attribute *ibmvfc_host_attrs[] = {
 	&dev_attr_drc_name.attr,
 	&dev_attr_npiv_version.attr,
 	&dev_attr_capabilities.attr,
+	&dev_attr_resource_sizes.attr,
 	&dev_attr_log_level.attr,
 	&dev_attr_nr_scsi_channels.attr,
 	NULL
@@ -5366,6 +5377,9 @@ static void ibmvfc_channel_setup(struct ibmvfc_host *vhost)
 		return;
 	}
 
+	ibmvfc_dbg(vhost, "Attempting to register %u SCSI channels\n", scsi_channels);
+	ibmvfc_dbg(vhost, "Attempting to register %u NVMe channels\n", nvme_channels);
+
 	memset(setup_buf, 0, sizeof(*setup_buf));
 	if (!scsi_channels && !nvme_channels)
 		setup_buf->flags = cpu_to_be32(IBMVFC_CANCEL_CHANNELS);
@@ -5425,6 +5439,9 @@ static void ibmvfc_channel_enquiry_done(struct ibmvfc_event *evt)
 		ibmvfc_free_event(evt);
 		return;
 	}
+
+	ibmvfc_dbg(vhost, "VIOS SCSI channels available: %u\n", vhost->max_vios_scsi_channels);
+	ibmvfc_dbg(vhost, "VIOS NVMe channels available: %u\n", vhost->max_vios_nvme_channels);
 
 	ibmvfc_channel_setup(vhost);
 }
