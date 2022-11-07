@@ -709,6 +709,8 @@ static void ibmvfc_link_down(struct ibmvfc_host *vhost,
 	scsi_block_requests(vhost->host);
 	list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue)
 		ibmvfc_del_tgt(tgt);
+	list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue)
+		ibmvfc_del_tgt(tgt);
 	ibmvfc_set_host_state(vhost, state);
 	ibmvfc_set_host_action(vhost, IBMVFC_HOST_ACTION_TGT_DEL);
 	vhost->events_to_log |= IBMVFC_AE_LINKDOWN;
@@ -741,6 +743,12 @@ static void ibmvfc_init_host(struct ibmvfc_host *vhost)
 		vhost->async_crq.cur = 0;
 
 		list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue) {
+			if (vhost->client_migrated)
+				tgt->need_login = 1;
+			else
+				ibmvfc_del_tgt(tgt);
+		}
+		list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue) {
 			if (vhost->client_migrated)
 				tgt->need_login = 1;
 			else
@@ -1870,6 +1878,12 @@ static void ibmvfc_relogin(struct scsi_device *sdev)
 
 	spin_lock_irqsave(vhost->host->host_lock, flags);
 	list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue) {
+		if (rport == tgt->rport) {
+			ibmvfc_del_tgt(tgt);
+			break;
+		}
+	}
+	list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue) {
 		if (rport == tgt->rport) {
 			ibmvfc_del_tgt(tgt);
 			break;
