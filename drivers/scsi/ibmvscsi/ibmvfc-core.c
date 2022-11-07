@@ -1278,6 +1278,11 @@ static struct ibmvfc_target *__ibmvfc_get_target(struct scsi_target *starget)
 			kref_get(&tgt->kref);
 			return tgt;
 		}
+	list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue)
+		if (tgt->target_id == starget->id) {
+			kref_get(&tgt->kref);
+			return tgt;
+		}
 	return NULL;
 }
 
