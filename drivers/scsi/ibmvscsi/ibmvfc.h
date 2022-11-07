@@ -380,6 +380,7 @@ struct ibmvfc_move_login {
 struct ibmvfc_prli_svc_parms {
 	u8 type;
 #define IBMVFC_SCSI_FCP_TYPE		0x08
+#define IBMVFC_NVME_FCP_TYPE		0x28
 	u8 type_ext;
 	__be16 flags;
 #define IBMVFC_PRLI_ORIG_PA_VALID			0x8000

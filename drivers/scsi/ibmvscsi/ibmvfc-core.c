@@ -4076,11 +4076,12 @@ static void ibmvfc_tgt_prli_done(struct ibmvfc_event *evt)
 	ibmvfc_set_tgt_action(tgt, IBMVFC_TGT_ACTION_NONE);
 	switch (status) {
 	case IBMVFC_MAD_SUCCESS:
-		tgt_dbg(tgt, "Process Login succeeded: %X %02X %04X\n",
-			parms->type, parms->flags, parms->service_parms);
+		tgt_dbg(tgt, "%s Process Login succeeded: %X %02X %04X\n",
+			proto_type[tgt->protocol], parms->type, parms->flags,
+			parms->service_parms);
 
+		index = ibmvfc_get_prli_rsp(be16_to_cpu(parms->flags));
 		if (parms->type == IBMVFC_SCSI_FCP_TYPE) {
-			index = ibmvfc_get_prli_rsp(be16_to_cpu(parms->flags));
 			if (prli_rsp[index].logged_in) {
 				if (be16_to_cpu(parms->flags) & IBMVFC_PRLI_EST_IMG_PAIR) {
 					tgt->need_login = 0;
@@ -4096,6 +4097,12 @@ static void ibmvfc_tgt_prli_done(struct ibmvfc_event *evt)
 				ibmvfc_retry_tgt_init(tgt, ibmvfc_tgt_send_prli);
 			else
 				ibmvfc_del_tgt(tgt);
+		} else if (parms->type == IBMVFC_NVME_FCP_TYPE) {
+			if (prli_rsp[index].logged_in) {
+				tgt->need_login = 0;
+				tgt->add_rport = 1;
+			} else if (prli_rsp[index].retry)
+				ibmvfc_retry_tgt_init(tgt, ibmvfc_tgt_send_prli);
 		} else
 			ibmvfc_del_tgt(tgt);
 		break;
@@ -4116,9 +4123,10 @@ static void ibmvfc_tgt_prli_done(struct ibmvfc_event *evt)
 		else
 			ibmvfc_del_tgt(tgt);
 
-		tgt_log(tgt, level, "Process Login failed: %s (%x:%x) rc=0x%02X\n",
-			ibmvfc_get_cmd_error(be16_to_cpu(rsp->status), be16_to_cpu(rsp->error)),
-			be16_to_cpu(rsp->status), be16_to_cpu(rsp->error), status);
+		tgt_log(tgt, level, "%s Process Login failed: %s (%x:%x) rc=0x%02X\n",
+			proto_type[tgt->protocol], ibmvfc_get_cmd_error(be16_to_cpu(rsp->status),
+			be16_to_cpu(rsp->error)), be16_to_cpu(rsp->status),
+			be16_to_cpu(rsp->error), status);
 		break;
 	}
 
@@ -4160,11 +4168,16 @@ static void ibmvfc_tgt_send_prli(struct ibmvfc_target *tgt)
 	} else {
 		prli->common.version = cpu_to_be32(1);
 	}
-	prli->common.opcode = cpu_to_be32(IBMVFC_PROCESS_LOGIN);
+	if (tgt->protocol == IBMVFC_PROTO_SCSI) {
+		prli->common.opcode = cpu_to_be32(IBMVFC_PROCESS_LOGIN);
+		prli->parms.type = IBMVFC_SCSI_FCP_TYPE;
+	} else {
+		prli->common.opcode = cpu_to_be32(IBMVFC_NVMF_PROCESS_LOGIN);
+		prli->parms.type = IBMVFC_NVME_FCP_TYPE;
+	}
 	prli->common.length = cpu_to_be16(sizeof(*prli));
 	prli->scsi_id = cpu_to_be64(tgt->scsi_id);
 
-	prli->parms.type = IBMVFC_SCSI_FCP_TYPE;
 	prli->parms.flags = cpu_to_be16(IBMVFC_PRLI_EST_IMG_PAIR);
 	prli->parms.service_parms = cpu_to_be32(IBMVFC_PRLI_INITIATOR_FUNC);
 	prli->parms.service_parms |= cpu_to_be32(IBMVFC_PRLI_READ_FCP_XFER_RDY_DISABLED);
@@ -4178,7 +4191,7 @@ static void ibmvfc_tgt_send_prli(struct ibmvfc_target *tgt)
 		ibmvfc_set_tgt_action(tgt, IBMVFC_TGT_ACTION_NONE);
 		kref_put(&tgt->kref, ibmvfc_release_tgt);
 	} else
-		tgt_dbg(tgt, "Sent process login\n");
+		tgt_dbg(tgt, "%s Sent process login\n", proto_type[tgt->protocol]);
 }
 
 /**
