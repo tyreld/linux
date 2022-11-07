@@ -5675,6 +5675,11 @@ static int ibmvfc_dev_init_to_do(struct ibmvfc_host *vhost)
 		    tgt->action == IBMVFC_TGT_ACTION_INIT_WAIT)
 			return 1;
 	}
+	list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue) {
+		if (tgt->action == IBMVFC_TGT_ACTION_INIT ||
+		    tgt->action == IBMVFC_TGT_ACTION_INIT_WAIT)
+			return 1;
+	}
 
 	return 0;
 }
@@ -5691,6 +5696,11 @@ static int ibmvfc_dev_logo_to_do(struct ibmvfc_host *vhost)
 	struct ibmvfc_target *tgt;
 
 	list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue) {
+		if (tgt->action == IBMVFC_TGT_ACTION_LOGOUT_RPORT ||
+		    tgt->action == IBMVFC_TGT_ACTION_LOGOUT_RPORT_WAIT)
+			return 1;
+	}
+	list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue) {
 		if (tgt->action == IBMVFC_TGT_ACTION_LOGOUT_RPORT ||
 		    tgt->action == IBMVFC_TGT_ACTION_LOGOUT_RPORT_WAIT)
 			return 1;
@@ -5723,7 +5733,13 @@ static int __ibmvfc_work_to_do(struct ibmvfc_host *vhost)
 		list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue)
 			if (tgt->action == IBMVFC_TGT_ACTION_INIT)
 				return 1;
+		list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue)
+			if (tgt->action == IBMVFC_TGT_ACTION_INIT)
+				return 1;
 		list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue)
+			if (tgt->action == IBMVFC_TGT_ACTION_INIT_WAIT)
+				return 0;
+		list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue)
 			if (tgt->action == IBMVFC_TGT_ACTION_INIT_WAIT)
 				return 0;
 		return 1;
@@ -5734,7 +5750,13 @@ static int __ibmvfc_work_to_do(struct ibmvfc_host *vhost)
 		list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue)
 			if (tgt->action == IBMVFC_TGT_ACTION_LOGOUT_RPORT)
 				return 1;
+		list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue)
+			if (tgt->action == IBMVFC_TGT_ACTION_LOGOUT_RPORT)
+				return 1;
 		list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue)
+			if (tgt->action == IBMVFC_TGT_ACTION_LOGOUT_RPORT_WAIT)
+				return 0;
+		list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue)
 			if (tgt->action == IBMVFC_TGT_ACTION_LOGOUT_RPORT_WAIT)
 				return 0;
 		return 1;
@@ -5926,10 +5948,18 @@ static void ibmvfc_do_work(struct ibmvfc_host *vhost)
 	case IBMVFC_HOST_ACTION_QUERY:
 		list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue)
 			ibmvfc_init_tgt(tgt, ibmvfc_tgt_query_target);
+		list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue)
+			ibmvfc_init_tgt(tgt, ibmvfc_tgt_query_target);
 		ibmvfc_set_host_action(vhost, IBMVFC_HOST_ACTION_QUERY_TGTS);
 		break;
 	case IBMVFC_HOST_ACTION_QUERY_TGTS:
 		list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue) {
+			if (tgt->action == IBMVFC_TGT_ACTION_INIT) {
+				tgt->job_step(tgt);
+				break;
+			}
+		}
+		list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue) {
 			if (tgt->action == IBMVFC_TGT_ACTION_INIT) {
 				tgt->job_step(tgt);
 				break;
@@ -5942,6 +5972,12 @@ static void ibmvfc_do_work(struct ibmvfc_host *vhost)
 	case IBMVFC_HOST_ACTION_TGT_DEL:
 	case IBMVFC_HOST_ACTION_TGT_DEL_FAILED:
 		list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue) {
+			if (tgt->action == IBMVFC_TGT_ACTION_LOGOUT_RPORT) {
+				tgt->job_step(tgt);
+				break;
+			}
+		}
+		list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue) {
 			if (tgt->action == IBMVFC_TGT_ACTION_LOGOUT_RPORT) {
 				tgt->job_step(tgt);
 				break;
@@ -6029,6 +6065,12 @@ static void ibmvfc_do_work(struct ibmvfc_host *vhost)
 		break;
 	case IBMVFC_HOST_ACTION_TGT_INIT:
 		list_for_each_entry(tgt, &vhost->scsi_scrqs.targets, queue) {
+			if (tgt->action == IBMVFC_TGT_ACTION_INIT) {
+				tgt->job_step(tgt);
+				break;
+			}
+		}
+		list_for_each_entry(tgt, &vhost->nvme_scrqs.targets, queue) {
 			if (tgt->action == IBMVFC_TGT_ACTION_INIT) {
 				tgt->job_step(tgt);
 				break;
