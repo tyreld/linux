@@ -10,13 +10,17 @@
 #ifndef _IBMVFC_H
 #define _IBMVFC_H
 
+#include <linux/interrupt.h>
 #include <linux/list.h>
 #include <linux/types.h>
+#include <scsi/scsi_device.h>
 #include <scsi/viosrp.h>
 #include <linux/nvme.h>
 #include <linux/nvme-fc.h>
 
-#define IBMVFC_NAME	"ibmvfc"
+#include "ibmvfc-nvme.h"
+
+#define IBMVFC_NAME			"ibmvfc"
 #define IBMVFC_DRIVER_VERSION		"1.0.11"
 #define IBMVFC_DRIVER_DATE		"(April 12, 2013)"
 
@@ -984,6 +988,7 @@ struct ibmvfc_host {
 	int mq_enabled:1;
 	int using_channels:1;
 	int do_enquiry:1;
+	int nvme_enabled:1;
 	int aborting_passthru:1;
 	int scan_complete:1;
 	int scan_timeout;
