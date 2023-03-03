@@ -5914,6 +5914,22 @@ static void ibmvfc_tgt_add_rport(struct ibmvfc_target *tgt)
 	spin_unlock_irqrestore(vhost->host->host_lock, flags);
 }
 
+const char *ibmvfc_host_actions [] = {
+	"NONE",
+	"RESET",
+	"REENABLE",
+	"LOGO",
+	"LOGO_WAIT",
+	"INIT",
+	"INIT_WAIT",
+	"QUERY",
+	"QUERY_TGTS",
+	"TGT_DEL",
+	"ALLOC_TGTS",
+	"TGT_INIT",
+	"TGT_DEL_FAILED",
+};
+
 /**
  * ibmvfc_do_work - Do task level work
  * @vhost:		ibmvfc host struct
@@ -5930,6 +5946,7 @@ static void ibmvfc_do_work(struct ibmvfc_host *vhost)
 	ibmvfc_log_ae(vhost, vhost->events_to_log);
 	spin_lock_irqsave(vhost->host->host_lock, flags);
 	vhost->events_to_log = 0;
+	ibmvfc_dbg(vhost, "host action: %s\n", ibmvfc_host_actions[vhost->action]);
 	switch (vhost->action) {
 	case IBMVFC_HOST_ACTION_NONE:
 	case IBMVFC_HOST_ACTION_LOGO_WAIT:
