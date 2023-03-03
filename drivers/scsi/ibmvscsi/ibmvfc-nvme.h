@@ -13,6 +13,8 @@
 #include <uapi/scsi/fc/fc_fs.h>
 #include <uapi/scsi/fc/fc_els.h>
 #include <linux/nvme-fc-driver.h>
+#include <linux/nvme.h>
+#include <linux/nvme-fc.h>
 
 #include "ibmvfc.h"
 
@@ -21,10 +23,16 @@
 #define IBMVFC_MAX_NVME_QUEUES	16
 #define IBMVFC_NVME_CHANNELS	8
 
+#define IBMVFC_FC4_LS_TIMEOUT	15
+#define IBMVFC_FC4_LS_CANCEL_TIMEOUT	45
+#define IBMVFC_FC4_LS_PLUS_CANCEL_TIMEOUT	\
+	(IBMVFC_FC4_LS_TIMEOUT + IBMVFC_FC4_LS_CANCEL_TIMEOUT)
+
 extern unsigned int ibmvfc_debug;
 
 struct ibmvfc_host;
 struct ibmvfc_target;
+struct ibmvfc_queue;
 
 struct ibmvfc_nvme_qhandle {
 	unsigned int qidx;
