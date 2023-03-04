@@ -26,6 +26,13 @@ extern unsigned int ibmvfc_debug;
 struct ibmvfc_host;
 struct ibmvfc_target;
 
+struct ibmvfc_nvme_qhandle {
+	unsigned int qidx;
+	u16 cpu_id;
+	unsigned long index;
+	struct ibmvfc_queue *queue;
+};
+
 int ibmvfc_nvme_register_remoteport(struct ibmvfc_target *);
 void ibmvfc_nvme_unregister_remoteport(struct ibmvfc_target *);
 int ibmvfc_nvme_register(struct ibmvfc_host *);
