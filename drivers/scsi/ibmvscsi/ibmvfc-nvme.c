@@ -158,6 +158,9 @@ static void ibmvfc_nvme_ls_abort(struct nvme_fc_local_port *lport,
 				struct nvme_fc_remote_port *rport,
 				struct nvmefc_ls_req *ls_abort)
 {
+	struct ibmvfc_host *vhost = lport->private;
+
+	ibmvfc_dbg(vhost, "nvme_ls_abort\n");
 }
 
 static void ibmvfc_nvme_done(struct ibmvfc_event *evt)
@@ -310,6 +313,9 @@ static void ibmvfc_nvme_fcp_abort(struct nvme_fc_local_port *lport,
 				  void *hw_queue_handle,
 				  struct nvmefc_fcp_req *abort_req)
 {
+	struct ibmvfc_host *vhost = lport->private;
+
+	ibmvfc_dbg(vhost, "nvme_fcp_abort\n");
 }
 
 static struct nvme_fc_port_template ibmvfc_nvme_fc_transport = {
